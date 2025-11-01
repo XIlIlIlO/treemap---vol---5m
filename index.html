@@ -3,12 +3,33 @@
 <head>
   <meta charset="UTF-8" />
   <title>SUPERHERO Treemap — Volatility × Turnover (Auto 60s)</title>
-
-  <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.3.0/dist/chartjs-chart-treemap.min.js"></script>
+  <style>
+    :root { --treemap-w: 1280px; --treemap-h: 720px; }
+    body { background:#000; color:#fff; font-family:sans-serif; }
+  </style>
+</head>
+<body>
+  <div>
+    <label for="endpoint">엔드포인트 선택: </label>
+    <select id="endpoint">
+      <option value="/top_volatility_1m">1분 변동성</option>
+      <option value="/top_volatility_5m" selected>5분 변동성</option>
+      <option value="/top_volatility_15m">15분 변동성</option>
+      <option value="/top_volatility_1h">1시간 변동성</option>
+      <option value="/top_spike_1h_recent">신규코인 급등(1H)</option>
+      <option value="/top_dump_1h_recent">신규코인 급락(1H)</option>
+      <option value="/top_spike_1h_all">전종목 급등(1H)</option>
+      <option value="/top_dump_1h_all">전종목 급락(1H)</option>
+    </select>
+    <span id="time"></span>
+    <span id="countdown"></span>
+  </div>
 
-  <script>
+  <div style="width:1280px; height:720px;">
+    <canvas id="chart-area"></canvas>
+  </div>
   const API_BASE = "https://binance-flask-app-production.up.railway.app";
   const endpointSel = document.getElementById("endpoint");
   let secondsToNextUpdate = 60;
