@@ -3,16 +3,45 @@
 <head>
   <meta charset="UTF-8" />
   <title>SUPERHERO Treemap — Volatility × Turnover (Auto 60s)</title>
+
+  <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.3.0/dist/chartjs-chart-treemap.min.js"></script>
+
   <style>
+    :root { --scale: 0.70; }
+    html, body { margin:0; padding:0; background:#000; color:#fff; font-family:system-ui,-apple-system,Roboto,sans-serif; overflow:hidden; width:100vw; height:100vh; }
+    body { transform:scale(var(--scale)); transform-origin:top left; width:calc(100%/var(--scale)); height:calc(100%/var(--scale)); padding:calc(28px/var(--scale)); }
+    h1 { font-size:24px; margin:0 0 12px 0; }
+    .row { display:flex; gap:16px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
+    label, select { font-size:14px; color:#ddd; }
+    select { background:#111; color:#fff; border:1px solid #333; border-radius:6px; padding:6px 10px; outline:none; }
+    #time { font-size:14px; color:#aaa; }
+    #countdown { margin-left:12px; color:#888; }
+
     :root { --treemap-w: 1280px; --treemap-h: 720px; }
-    body { background:#000; color:#fff; font-family:sans-serif; }
+    #chartWrap { width:var(--treemap-w); height:var(--treemap-h); }
+    #chart-area { width:var(--treemap-w); height:var(--treemap-h); display:block; border:1px solid #222; border-radius:10px; }
+
+    .legend { font-size:12px; color:#bbb; display:flex; gap:16px; align-items:center; }
+    .chip { width:14px; height:14px; border-radius:3px; display:inline-block; margin-right:6px; border:1px solid #333; }
+    .chip.up { background:#afff00; } .chip.down { background:#f73f21; }
   </style>
 </head>
 <body>
-  <div>
-    <label for="endpoint">엔드포인트 선택: </label>
+  <h1>■ SUPERHERO 실시간 트리맵 (면적=변동성, 색상=등락, 진하기=거래대금) ■</h1>
+
+  <div class="row">
+    <div class="legend">
+      <span><span class="chip up"></span>상승</span>
+      <span><span class="chip down"></span>하락</span>
+      <span>진하기 ↑ = 거래대금(USDT) ↑</span>
+      <span>면적 ↑ = 변동성(%) ↑</span>
+    </div>
+  </div>
+
+  <div class="row">
+    <label for="endpoint">엔드포인트:</label>
     <select id="endpoint">
       <option value="/top_volatility_1m">1분 변동성</option>
       <option value="/top_volatility_5m" selected>5분 변동성</option>
@@ -23,13 +52,14 @@
       <option value="/top_spike_1h_all">전종목 급등(1H)</option>
       <option value="/top_dump_1h_all">전종목 급락(1H)</option>
     </select>
-    <span id="time"></span>
-    <span id="countdown"></span>
+    <span id="time">UTC 로딩 중...</span>
+    <span id="countdown">다음 갱신까지 60s</span>
   </div>
 
-  <div style="width:1280px; height:720px;">
+  <div id="chartWrap">
     <canvas id="chart-area"></canvas>
   </div>
+
   <script>
   const API_BASE = "https://binance-flask-app-production.up.railway.app";
   const endpointSel = document.getElementById("endpoint");
@@ -267,7 +297,6 @@
   endpointSel.addEventListener("change", refresh);
   window.addEventListener("resize", ()=>refresh());
 </script>
-
 
 </body>
 </html>
