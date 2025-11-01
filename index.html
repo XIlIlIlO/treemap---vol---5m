@@ -8,59 +8,22 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.3.0/dist/chartjs-chart-treemap.min.js"></script>
 
-  <style>
-    :root { --scale: 0.70; --treemap-w: 1280px; --treemap-h: 720px; }
-    html, body { margin:0; padding:0; background:#000; color:#fff; font-family:system-ui,-apple-system,Roboto,sans-serif; overflow:hidden; width:100vw; height:100vh; }
-    body { transform:scale(var(--scale)); transform-origin:top left; width:calc(100%/var(--scale)); height:calc(100%/var(--scale)); padding:calc(28px/var(--scale)); }
-    h1 { font-size:24px; margin:0 0 12px 0; }
-    .row { display:flex; gap:16px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
-    label, select { font-size:14px; color:#ddd; }
-    select { background:#111; color:#fff; border:1px solid #333; border-radius:6px; padding:6px 10px; outline:none; }
-    #time { font-size:14px; color:#aaa; }
-    #countdown { margin-left:12px; color:#888; }
-    #chartWrap { width:var(--treemap-w); height:var(--treemap-h); }
-    #chart-area { width:var(--treemap-w); height:var(--treemap-h); display:block; border:1px solid #222; border-radius:10px; }
-    .legend { font-size:12px; color:#bbb; display:flex; gap:16px; align-items:center; }
-    .chip { width:14px; height:14px; border-radius:3px; display:inline-block; margin-right:6px; border:1px solid #333; }
-    .chip.up { background:#afff00; } .chip.down { background:#f73f21; }
-  </style>
-</head>
-<body>
-  <h1>■ SUPERHERO 실시간 트리맵 (면적=변동성, 색상=등락, 진하기=거래대금) ■</h1>
-
-  <div class="row">
-    <div class="legend">
-      <span><span class="chip up"></span>상승</span>
-      <span><span class="chip down"></span>하락</span>
-      <span>진하기 ↑ = 거래대금(USDT) ↑</span>
-      <span>면적 ↑ = 변동성(%) ↑</span>
-    </div>
-  </div>
-
-  <div class="row">
-    <label for="endpoint">엔드포인트:</label>
-    <select id="endpoint">
-      <option value="/top_volatility_1m">1분 변동성</option>
-      <option value="/top_volatility_5m" selected>5분 변동성</option>
-      <option value="/top_volatility_15m">15분 변동성</option>
-      <option value="/top_volatility_1h">1시간 변동성</option>
-      <option value="/top_spike_1h_recent">신규코인 급등(1H)</option>
-      <option value="/top_dump_1h_recent">신규코인 급락(1H)</option>
-      <option value="/top_spike_1h_all">전종목 급등(1H)</option>
-      <option value="/top_dump_1h_all">전종목 급락(1H)</option>
-    </select>
-    <span id="time">UTC 로딩 중...</span>
-    <span id="countdown">다음 갱신까지 60s</span>
-  </div>
-
-  <div id="chartWrap">
-    <canvas id="chart-area"></canvas>
-  </div>
-
-<script>
+  <script>
   const API_BASE = "https://binance-flask-app-production.up.railway.app";
   const endpointSel = document.getElementById("endpoint");
   let secondsToNextUpdate = 60;
+
+  const HEX = { green:"#2db84d", red:"#c6453a", gray:"#444444" };
+
+  const fmtPct = v => `${(Number(v)||0).toFixed(2)}%`;
+  const formatCompact = n => {
+    const v = +n || 0;
+    if(v>=1e12) return (v/1e12).toFixed(2)+"T";
+    if(v>=1e9)  return (v/1e9 ).toFixed(2)+"B";
+    if(v>=1e6)  return (v/1e6 ).toFixed(2)+"M";
+    if(v>=1e3)  return (v/1e3 ).toFixed(2)+"K";
+    return v.toFixed(0);
+  };
 
   function updateTimeLabel(){
     const n=new Date(); const y=n.getUTCFullYear();
@@ -75,62 +38,31 @@
       document.getElementById("countdown").textContent=`다음 갱신까지 ${secondsToNextUpdate}s`; },1000);
   }
 
-  const fmtPct = v => `${(Number(v)||0).toFixed(2)}%`;
-  function formatCompact(num){
-    const n=+num||0;
-    if(n>=1e12) return (n/1e12).toFixed(2)+"T";
-    if(n>=1e9)  return (n/1e9 ).toFixed(2)+"B";
-    if(n>=1e6)  return (n/1e6 ).toFixed(2)+"M";
-    if(n>=1e3)  return (n/1e3 ).toFixed(2)+"K";
-    return n.toFixed(0);
-  }
-
   // ─────────────────────────────────────────────────
-  // ✅ API 색상 신뢰: color/color_1h → hex 매핑
-  //   (서버가 'green'/'red'/'gray' 제공)
-  const HEX = {
-    green: "#2db84d",
-    red:   "#c6453a",
-    gray:  "#444444"
-  };
-  function pickColorHex(d, fallbackByVol=0){
-    const c = (d.color || d.color_1h || "").toLowerCase();
-    if (c in HEX) return HEX[c];
-    // fallback: 변동성 부호로 추정
-    return (fallbackByVol >= 0 ? HEX.green : HEX.red);
-  }
-
-  // ─────────────────────────────────────────────────
-  // ✅ 원시 데이터 정규화 (엔드포인트별 필드 자동 감지)
+  // 1) 원시 데이터 정규화 (키 자동 매핑)
   function normalizeData(raw, endpointPath){
     const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
     const isSpike = endpointPath.includes("_spike_");
     const isDump  = endpointPath.includes("_dump_");
 
     return arr.map(d=>{
-      // volatility / spike_pct / dump_pct 자동 선별
       let vol = 0;
       if ("volatility" in d) vol = Number(d.volatility)||0;
       else if (isSpike) vol = Number(d.spike_pct)||0;
       else if (isDump)  vol = Number(d.dump_pct)||0;
 
-      // 거래대금 필드 자동 선별
-      const volUSD = Number(
-        d.volume_usdt ?? d.volume_usdt_1h ?? 0
-      ) || 0;
+      const volUSD = Number(d.volume_usdt ?? d.volume_usdt_1h ?? 0) || 0;
 
-      // 심볼
       const sym = d.symbol || d.futures_symbol || d.name || "NA";
+      const rawColor = (d.color || d.color_1h || "").toLowerCase();
+      const colorHex = HEX[rawColor] || (vol >= 0 ? HEX.green : HEX.red);
 
-      // 서버 색상 신뢰 + 폴백
-      const colorHex = pickColorHex(d, vol);
-
-      return { symbol: sym, volatility: vol, volume_usdt: volUSD, colorHex };
+      return { symbol: sym, volatility: vol, volume_usdt: volUSD, colorHex, rawColor };
     }).filter(d=>d.symbol);
   }
 
   // ─────────────────────────────────────────────────
-  // ✅ 트리맵 레이아웃 선택 (면적=|변동성|)
+  // 2) 레이아웃(면적=|변동성|)
   const TREEMAP_MAX_ITEMS=28, MIN_AREA_RATIO=0.01;
   function selectForLayout(data, w, h){
     const areaMetric = d => Math.abs(Number(d.volatility)||0);
@@ -149,39 +81,60 @@
   }
 
   // ─────────────────────────────────────────────────
-  // ✅ 진하기(거래대금) 안전 정규화:
-  //    - 로그 스케일
-  //    - 퍼센타일 클리핑(5~95%)
+  // 3) 진하기 정규화: 로그 + 5~95% 퍼센타일 클리핑
   function percentile(arr, p){
     if(!arr.length) return 0;
     const s = arr.slice().sort((a,b)=>a-b);
-    const idx = Math.min(s.length-1, Math.max(0, Math.floor((p/100)* (s.length-1))));
-    return s[idx];
+    const i = Math.min(s.length-1, Math.max(0, Math.floor((p/100)*(s.length-1))));
+    return s[i];
   }
-
   function makeTurnoverNormalizer(values){
-    if(!values.length) return ()=>0.5;
-    const logs = values.map(v=>Math.log1p(Math.max(0, Number(v)||0)));
-    // 분산이 없거나 전부 0일 때 가드
-    const minP = percentile(logs, 5);
-    const maxP = percentile(logs, 95);
-    const denom = Math.max(1e-9, maxP - minP);
-    return v => {
-      const t = Math.log1p(Math.max(0, Number(v)||0));
-      const z = (t - minP) / denom; // 0~1 (클리핑)
-      const zz = Math.max(0, Math.min(1, z));
-      // 0.45 ~ 0.98 사이로 매핑 (차이 뚜렷)
-      return 0.45 + 0.53 * zz;
+    if(!values.length) return ()=>0.6;
+    const logs = values.map(v=>Math.log1p(Math.max(0,+v||0)));
+    const lo = percentile(logs,5), hi = percentile(logs,95);
+    const den = Math.max(1e-9, hi-lo);
+    return v=>{
+      const z = (Math.log1p(Math.max(0,+v||0)) - lo)/den;
+      return Math.max(0, Math.min(1, z)); // 0~1
     };
   }
 
-  // hex → rgb
-  function hexToRgb(hex){
-    const h = hex.replace("#","");
-    const r = parseInt(h.slice(0,2),16);
-    const g = parseInt(h.slice(2,4),16);
-    const b = parseInt(h.slice(4,6),16);
-    return {r,g,b};
+  // RGB↔HSL 도우미 (Lightness만 조정)
+  function hexToRgb(hex){ const h=hex.replace("#",""); return {
+    r:parseInt(h.slice(0,2),16), g:parseInt(h.slice(2,4),16), b:parseInt(h.slice(4,6),16)
+  };}
+  function rgbToHsl(r,g,b){
+    r/=255; g/=255; b/=255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b);
+    let h=0,s=0,l=(max+min)/2;
+    if(max!==min){
+      const d=max-min;
+      s = l>0.5 ? d/(2-max-min) : d/(max+min);
+      switch(max){
+        case r: h=(g-b)/d + (g<b?6:0); break;
+        case g: h=(b-r)/d + 2; break;
+        case b: h=(r-g)/d + 4; break;
+      }
+      h/=6;
+    }
+    return {h,s,l};
+  }
+  function hslToRgb(h,s,l){
+    let r,g,b;
+    if(s===0){ r=g=b=l; }
+    else{
+      const hue2rgb=(p,q,t)=>{
+        if(t<0) t+=1; if(t>1) t-=1;
+        if(t<1/6) return p+(q-p)*6*t;
+        if(t<1/2) return q;
+        if(t<2/3) return p+(q-p)*(2/3 - t)*6;
+        return p;
+      };
+      const q = l<0.5 ? l*(1+s) : l+s-l*s;
+      const p = 2*l-q;
+      r=hue2rgb(p,q,h+1/3); g=hue2rgb(p,q,h); b=hue2rgb(p,q,h-1/3);
+    }
+    return {r:Math.round(r*255), g:Math.round(g*255), b:Math.round(b*255)};
   }
 
   let treemapChart=null;
@@ -189,26 +142,24 @@
   function renderTreemap(data){
     const w=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--treemap-w'));
     const h=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--treemap-h'));
-
     const {picked, totalAreaMetric} = selectForLayout(data, w, h);
 
-    // ── 진하기: 거래대금 로그 정규화 (+퍼센타일 클리핑)
-    const turnovers = picked.map(d => Math.max(0, Number(d.volume_usdt)||0));
-    const norm = makeTurnoverNormalizer(turnovers);
+    const turnovers = picked.map(d=>Math.max(0, Number(d.volume_usdt)||0));
+    const norm = makeTurnoverNormalizer(turnovers); // 0~1
 
-    // tree 데이터 구성
     const tree = picked.map(d=>{
       const vol = Number(d.volatility)||0;
       const areaVal = Math.max(0.001, Math.abs(vol));
       const turnover = Math.max(0, Number(d.volume_usdt)||0);
-      const sign = vol >= 0 ? '+' : '−';
+      const sign = (d.rawColor === 'red' ? '−' : '+');  // ← 부호를 색에서 생성
       const displayValue = `${d.symbol} ${sign}${Math.abs(vol).toFixed(2)}%`;
       return {
         symbol: d.symbol,
         area: areaVal,
         vol,
         turnover,
-        colorHex: d.colorHex,   // ✅ 서버 색상 유지
+        colorHex: d.colorHex,
+        rawColor: d.rawColor,
         displayValue,
         _data: { w: w*(areaVal/Math.max(totalAreaMetric,1)), h }
       };
@@ -216,12 +167,13 @@
 
     const ctx=document.getElementById("chart-area").getContext("2d");
 
-    // ✅ 배경색 = 서버 색상 × 진하기(거래대금)
     const backgroundColor = (c)=>{
-      const raw=c.raw||{};
+      const raw = c.raw || {};
       const {r,g,b} = hexToRgb(raw.colorHex || "#2db84d");
-      const f = norm(raw.turnover); // 0.45~0.98
-      return `rgba(${Math.round(r*f)},${Math.round(g*f)},${Math.round(b*f)},1)`;
+      const {h,s} = rgbToHsl(r,g,b);
+      const l = 0.35 + 0.43 * norm(raw.turnover); // Lightness 35%~78%
+      const rgb = hslToRgb(h,s,l);
+      return `rgba(${rgb.r},${rgb.g},${rgb.b},1)`;
     };
 
     const dataSet = {
@@ -235,17 +187,12 @@
       backgroundColor,
       labels:{
         display:true,
-        formatter:(ctx)=>{
-          const r = ctx.raw || {};
-          return r.displayValue || r.g || r.symbol || "";
-        },
+        formatter:(ctx)=> ctx.raw?.displayValue || "",
         color:'#eef2f6',
         align:'center',
         font:(ctx)=>{
           const r = ctx.raw || {};
-          const approxW = r._data?.w || 80;
-          const approxH = r._data?.h || 60;
-          const base = Math.min(approxW, approxH);
+          const base = Math.min(r._data?.w||80, r._data?.h||60);
           const size = Math.max(12, Math.min(48, base*0.16));
           return { size, weight:'800', lineHeight:1.15 };
         },
@@ -263,12 +210,9 @@
             title:(items)=> (items[0].raw?.symbol)||'',
             label:(item)=>{
               const raw=item.raw||{};
-              const v = Number(raw.vol) || 0;
-              const t = Number(raw.turnover) || 0;
-              // ✅ 항상 숫자 보장
               return [
-                `변동성(면적): ${fmtPct(v)}`,
-                `거래대금(진하기): ${formatCompact(t)} USDT`
+                `변동성(면적): ${fmtPct(Number(raw.vol)||0)}`,
+                `거래대금(진하기): ${formatCompact(Number(raw.turnover)||0)} USDT`
               ];
             }
           }
@@ -277,21 +221,18 @@
       layout:{ padding:3 }
     };
 
-    if(treemapChart){
-      treemapChart.data.datasets[0]=dataSet;
-      treemapChart.update();
-    }else{
-      treemapChart = new Chart(ctx, { type:'treemap', data:{ datasets:[dataSet] }, options });
-    }
+    if(treemapChart){ treemapChart.data.datasets[0]=dataSet; treemapChart.update(); }
+    else{ treemapChart = new Chart(ctx, { type:'treemap', data:{ datasets:[dataSet] }, options }); }
   }
 
   async function fetchData(path){
     const res=await fetch(API_BASE+path,{cache:"no-store"});
     return await res.json();
   }
+  function updateTimeLabelWrap(){ updateTimeLabel(); }
 
   async function refresh(){
-    updateTimeLabel(); secondsToNextUpdate=60;
+    updateTimeLabelWrap(); secondsToNextUpdate=60;
     const path=endpointSel.value;
     let raw;
     try{ raw=await fetchData(path); }
@@ -304,6 +245,7 @@
   endpointSel.addEventListener("change", refresh);
   window.addEventListener("resize", ()=>refresh());
 </script>
+
 
 </body>
 </html>
