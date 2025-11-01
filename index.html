@@ -182,6 +182,32 @@
       }).filter(d => d.symbol && d.volume_usdt >= 0 && d.volatility >= 0);
     }
 
+    /* ======================================================
+       ▼▼▼ ① 추가: Treemap 정돈 옵션 & 선택 로직 ▼▼▼
+       ====================================================== */
+    const TREEMAP_MAX_ITEMS = 10;   // 최대 표출 종목 수
+    const MIN_AREA_RATIO    = 0.05; // 전체 영역 대비 최소 5%
+
+    function selectForLayout(data, width, height) {
+      const total = d3.sum(data, d => Math.max(0, d.volume_usdt || 0));
+      const area  = width * height;
+      const minArea = area * MIN_AREA_RATIO;
+
+      const sorted = data.slice().sort((a,b) => (b.volume_usdt||0) - (a.volume_usdt||0));
+
+      const picked = [];
+      for (const d of sorted) {
+        if (picked.length >= TREEMAP_MAX_ITEMS) break;
+        const estArea = total > 0 ? (d.volume_usdt / total) * area : 0;
+        if (estArea >= minArea) picked.push(d);
+      }
+      if (picked.length === 0 && sorted.length) picked.push(sorted[0]);
+      return picked;
+    }
+    /* ======================================================
+       ▲▲▲ ① 추가 끝
+       ====================================================== */
+
     // ====== Treemap 렌더링 (샘플 스타일) ======
     const tooltip = document.getElementById("tooltip");
     function showTip(html, x, y) {
@@ -196,22 +222,29 @@
       tooltip.style.display = "none";
     }
 
+    /* ======================================================
+       ▼▼▼ ② 추가/교체: 정돈된 treemapBinary + 필터 ▼▼▼
+       ====================================================== */
     function renderTreemap(data) {
       const { w, h } = sizeSVG();
       svg.selectAll("*").remove();
       if (!data.length) return;
 
-      const maxVol = d3.max(data, d => Math.max(0, d.volatility || 0));
+      const filtered = selectForLayout(data, w, h);
+      const maxVol = d3.max(filtered, d => Math.max(0, d.volatility || 0));
 
-      // 면적 = 거래대금, 얇은 격자
-      const root = d3.hierarchy({ name: "root", children: data })
+      const root = d3.hierarchy({ name: "root", children: filtered })
         .sum(d => Math.max(0.0001, d.volume_usdt))
-        .sort((a,b) => (b.data.volatility||0) - (a.data.volatility||0));
+        .sort((a,b) =>
+          (b.data.volume_usdt||0) - (a.data.volume_usdt||0) ||
+          (b.data.volatility||0)  - (a.data.volatility||0)
+        );
 
       d3.treemap()
+        .tile(d3.treemapBinary)   // 깔끔한 줄 정렬
         .size([w, h])
-        .paddingInner(2)
-        .paddingOuter(2)
+        .paddingInner(3)
+        .paddingOuter(3)
         .round(true)(root);
 
       const cell = svg.selectAll("g.cell")
@@ -220,70 +253,55 @@
         .attr("class", "cell")
         .attr("transform", d => `translate(${d.x0},${d.y0})`)
         .on("mousemove", (event, d) => {
-          const sym = d.data.symbol;
-          const vol = d.data.volatility;
-          const usd = d.data.volume_usdt;
+          const { symbol, volatility, volume_usdt } = d.data;
           showTip(
-            `<b>${sym}</b><br/>변동성: <b>${fmtPct(vol)}</b><br/>거래대금: <b>${formatCompact(usd)}</b> USDT`,
+            `<b>${symbol}</b><br/>변동성: <b>${fmtPct(volatility)}</b><br/>거래대금: <b>${formatCompact(volume_usdt)}</b> USDT`,
             event.clientX, event.clientY
           );
         })
         .on("mouseleave", hideTip)
         .on("click", (event, d) => {
-          const url = `https://www.binance.com/en/futures/${d.data.symbol}`;
-          window.open(url, "_blank");
+          window.open(`https://www.binance.com/en/futures/${d.data.symbol}`, "_blank");
         });
 
-      // 배경 사각형(색 진하기 = 변동성 비례)
       cell.append("rect")
-        .attr("width", d => Math.max(0, d.x1 - d.x0))
+        .attr("width",  d => Math.max(0, d.x1 - d.x0))
         .attr("height", d => Math.max(0, d.y1 - d.y0))
-        .attr("fill", d => {
+        .attr("fill",   d => {
           const base = d3.color(colorBase(d.data.color));
-          const f = intensity(d.data.volatility || 0, maxVol); // 0.30~1.00
+          const f = maxVol > 0 ? (0.55 + 0.40 * Math.min(1, (d.data.volatility||0) / maxVol)) : 0.75;
           base.r = Math.round(base.r * f);
           base.g = Math.round(base.g * f);
           base.b = Math.round(base.b * f);
           return base.formatHex();
         });
 
-      // 중심 좌표/크기
       const cx = d => (d.x0 + d.x1) / 2;
       const cy = d => (d.y0 + d.y1) / 2;
       const ww = d => (d.x1 - d.x0);
       const hh = d => (d.y1 - d.y0);
 
-      // 임계값: 큰 타일(중앙 심볼+%), 작은 타일(좌상단 2줄)
-      const BIG_W = 240, BIG_H = 140;
-      const MED_W = 120, MED_H = 80;
+      const BIG_W = 260, BIG_H = 150;
+      const MED_W = 140, MED_H = 90;
 
-      // 큰/중 타일: 중앙 심볼
       cell.append("text")
         .attr("class", "label-center")
         .attr("x", d => cx(d))
-        .attr("y", d => cy(d) - 6)
-        .style("font-size", d => {
-          const s = Math.min(Math.max(16, ww(d) * 0.18), 42);
-          return s + "px";
-        })
+        .attr("y", d => cy(d) - 8)
+        .style("font-size", d => Math.min(Math.max(18, ww(d)*0.18), 46) + "px")
         .text(d => (ww(d) >= MED_W && hh(d) >= MED_H) ? d.data.symbol : "");
 
-      // 큰/중 타일: 중앙 퍼센트
       cell.append("text")
         .attr("class", "pct-center")
         .attr("x", d => cx(d))
-        .attr("y", d => cy(d) + 22)
-        .style("font-size", d => {
-          const s = Math.min(Math.max(12, ww(d) * 0.12), 28);
-          return s + "px";
-        })
+        .attr("y", d => cy(d) + 24)
+        .style("font-size", d => Math.min(Math.max(12, ww(d)*0.12), 30) + "px")
         .text(d => {
           if (ww(d) >= BIG_W && hh(d) >= BIG_H) return (d.data.color==="green" ? "+" : "−") + d.data.volatility.toFixed(2) + "%";
           if (ww(d) >= MED_W && hh(d) >= MED_H) return (d.data.color==="green" ? "+" : "−") + d.data.volatility.toFixed(2) + "%";
           return "";
         });
 
-      // 작은 타일: 좌상단 심볼 + % (두 줄)
       const small = cell.filter(d => ww(d) < MED_W || hh(d) < MED_H);
       small.append("text")
         .attr("class", "tiny")
@@ -297,6 +315,9 @@
         .attr("y", d => d.y0 + 28)
         .text(d => (d.data.color==="green" ? "+" : "−") + d.data.volatility.toFixed(2) + "%");
     }
+    /* ======================================================
+       ▲▲▲ ② 추가/교체 끝
+       ====================================================== */
 
     // ====== 데이터 가져오기 & 주기 갱신 ======
     async function fetchData(path) {
