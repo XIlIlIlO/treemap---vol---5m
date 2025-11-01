@@ -9,7 +9,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.3.0/dist/chartjs-chart-treemap.min.js"></script>
 
   <style>
-    :root { --scale: 0.70; }
+    :root { --scale: 0.70; --treemap-w: 1280px; --treemap-h: 720px; }
     html, body { margin:0; padding:0; background:#000; color:#fff; font-family:system-ui,-apple-system,Roboto,sans-serif; overflow:hidden; width:100vw; height:100vh; }
     body { transform:scale(var(--scale)); transform-origin:top left; width:calc(100%/var(--scale)); height:calc(100%/var(--scale)); padding:calc(28px/var(--scale)); }
     h1 { font-size:24px; margin:0 0 12px 0; }
@@ -18,11 +18,8 @@
     select { background:#111; color:#fff; border:1px solid #333; border-radius:6px; padding:6px 10px; outline:none; }
     #time { font-size:14px; color:#aaa; }
     #countdown { margin-left:12px; color:#888; }
-
-    :root { --treemap-w: 1280px; --treemap-h: 720px; }
     #chartWrap { width:var(--treemap-w); height:var(--treemap-h); }
     #chart-area { width:var(--treemap-w); height:var(--treemap-h); display:block; border:1px solid #222; border-radius:10px; }
-
     .legend { font-size:12px; color:#bbb; display:flex; gap:16px; align-items:center; }
     .chip { width:14px; height:14px; border-radius:3px; display:inline-block; margin-right:6px; border:1px solid #333; }
     .chip.up { background:#afff00; } .chip.down { background:#f73f21; }
@@ -89,28 +86,43 @@
     }
     const GREEN = "#2db84d";
     const RED   = "#c6453a";
-    const colorBaseHexFromVol = vol => (Number(vol) >= 0 ? GREEN : RED);
+    const colorFromSign = (sign) => (sign >= 0 ? GREEN : RED);
 
-    // ── 원시 데이터 정규화
+    // ── 데이터 정규화 (엔드포인트별 필드 편차 보정)
     function normalizeData(raw, endpointPath){
       const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
       const isSpike = endpointPath.includes("_spike_");
       const isDump  = endpointPath.includes("_dump_");
+
       return arr.map(d=>{
-        let vol=0, volUSD=0;
-        if("volatility" in d){ vol=Number(d.volatility)||0; volUSD=Number(d.volume_usdt)||0; }
-        else { if(isSpike) vol=Number(d.spike_pct)||0; if(isDump) vol=Number(d.dump_pct)||0; volUSD=Number(d.volume_usdt_1h)||0; }
-        const sym=d.symbol||d.futures_symbol||d.name||"NA";
-        // 색상은 '부호'로 직접 산정 (API color 무시/보정)
-        const col = vol >= 0 ? "green" : "red";
-        return { symbol:sym, volatility:vol, volume_usdt:volUSD, color:col };
+        // 변동성/등락률
+        let vol = 0;
+        if ("volatility" in d)        vol = Number(d.volatility) || 0;
+        else if ("spike_pct" in d)    vol = Number(d.spike_pct)   || 0;
+        else if ("dump_pct" in d)     vol = Number(d.dump_pct)    || 0;
+
+        // 거래대금 (여러 키 중 존재값 사용)
+        const turnover = [
+          d.volume_usdt_1h, d.volume_usdt, d.volume, d.turnover
+        ].map(v => Number(v))
+         .find(v => Number.isFinite(v)) ?? 0;
+
+        const sym = d.symbol || d.futures_symbol || d.name || "NA";
+
+        // 색상 = 엔드포인트 우선 규칙 → 그 외는 부호로
+        let sign = vol;
+        if (isSpike) sign = Math.abs(vol);        // spike는 상승으로 간주
+        if (isDump)  sign = -Math.abs(vol);       // dump는 하락으로 간주
+
+        const color = sign >= 0 ? "green" : "red";
+        return { symbol:sym, vol:vol, turnover:Math.max(0, turnover), color };
       }).filter(d=>d.symbol);
     }
 
     // ── 레이아웃 선택(면적=변동성)
     const TREEMAP_MAX_ITEMS=28, MIN_AREA_RATIO=0.01;
     function selectForLayout(data, w, h){
-      const areaMetric = d => Math.abs(Number(d.volatility)||0);  // 면적 기준 = |변동성|
+      const areaMetric = d => Math.abs(Number(d.vol)||0);  // 면적 기준 = |변동성|
       const totalAreaMetric = data.reduce((s,d)=>s+areaMetric(d),0);
       const area = w*h, minArea = area*MIN_AREA_RATIO;
 
@@ -133,69 +145,60 @@
 
       const {picked, totalAreaMetric} = selectForLayout(data, w, h);
 
-      // ── 진하기: 거래대금 log 스케일 정규화
-      const turnovers = picked.map(d => Math.max(0, Number(d.volume_usdt)||0));
-      const logVals = turnovers.map(v => Math.log1p(v));
-      const logMin = Math.min(...logVals, 0);
-      const logMax = Math.max(...logVals, 1);
-      const normTurnover = v => {
+      // ── 진하기: 거래대금 로그 정규화
+      const logs = picked.map(d => Math.log1p(d.turnover||0));
+      const logMin = Math.min(...logs, 0), logMax = Math.max(...logs, 1);
+      const normT = v => {
         const t = Math.log1p(Math.max(0, Number(v)||0));
-        return (t - logMin) / Math.max(1e-9, (logMax - logMin)); // 0~1
+        return (t - logMin) / Math.max(1e-9, (logMax - logMin));
       };
 
-      // tree 데이터 구성
+      // tree
       const tree = picked.map(d=>{
-        const vol = Number(d.volatility)||0;
-        const sign = vol >= 0 ? '+' : '−';
+        const vol = Number(d.vol)||0;
+        const sign = (endpointSel.value.includes("_dump_")) ? -Math.abs(vol)
+                   : (endpointSel.value.includes("_spike_")) ?  Math.abs(vol)
+                   : vol;
+        const plusMinus = sign >= 0 ? '+' : '−';
         const areaVal = Math.max(0.001, Math.abs(vol)); // 0 보호
-        const turnover = Math.max(0, Number(d.volume_usdt)||0);
-        const displayValue = `${d.symbol} ${sign}${Math.abs(vol).toFixed(2)}%`;
         return {
           symbol: d.symbol,
-          area: areaVal,                 // ✔ 면적 = 변동성(|vol|)
-          vol,
-          turnover,
-          color: vol >= 0 ? "green" : "red",
-          displayValue,
+          area: areaVal,                   // 면적 = |변동성|
+          vol,                             // 툴팁용 원시 변동성
+          turnover: d.turnover || 0,       // 진하기 기준
+          colorSign: sign,                 // 색상 판단용
+          displayValue: `${d.symbol} ${plusMinus}${Math.abs(vol).toFixed(2)}%`,
           _data: { w: w*(areaVal/Math.max(totalAreaMetric,1)), h }
         };
       });
 
       const ctx=document.getElementById("chart-area").getContext("2d");
 
-      // ✔ 배경색 진하기 = 거래대금 비례(로그 정규화, 0.50~0.98)
       const backgroundColor = (c)=>{
-        const raw=c.raw||{};
-        const base=colorBaseHexFromVol(raw.vol);
-        const r=parseInt(base.slice(1,3),16);
-        const g=parseInt(base.slice(3,5),16);
-        const b=parseInt(base.slice(5,7),16);
-        const f = 0.50 + 0.48 * normTurnover(raw.turnover);
-        return `rgba(${Math.round(r*f)},${Math.round(g*f)},${Math.round(b*f)},1)`;
+        const r=c.raw||{};
+        const base=colorFromSign(r.colorSign);
+        const R=parseInt(base.slice(1,3),16), G=parseInt(base.slice(3,5),16), B=parseInt(base.slice(5,7),16);
+        const f = 0.50 + 0.48 * normT(r.turnover); // 0.50~0.98
+        return `rgba(${Math.round(R*f)},${Math.round(G*f)},${Math.round(B*f)},1)`;
       };
 
       const dataSet = {
         label:"SUPERHERO",
         tree,
-        key:"area",                       // ✔ 면적 = area(변동성)
-        groups:["displayValue"],          // ✔ 라벨 텍스트 소스
+        key:"area",
+        groups:["displayValue"],
         spacing:2,
         borderWidth:1,
         borderColor:"rgba(10,10,10,0.9)",
         backgroundColor,
         labels:{
           display:true,
-          formatter:(ctx)=>{
-            const r = ctx.raw || {};
-            return r.displayValue || r.g || r.symbol || "";
-          },
+          formatter:(ctx)=>ctx.raw?.displayValue || "",
           color:'#eef2f6',
           align:'center',
           font:(ctx)=>{
             const r = ctx.raw || {};
-            const approxW = r._data?.w || 80;
-            const approxH = r._data?.h || 60;
-            const base = Math.min(approxW, approxH);
+            const base = Math.min(r._data?.w||80, r._data?.h||60);
             const size = Math.max(12, Math.min(48, base*0.16));
             return { size, weight:'800', lineHeight:1.15 };
           },
@@ -212,11 +215,14 @@
             callbacks:{
               title:(items)=> (items[0].raw?.symbol)||'',
               label:(item)=>{
-                const raw=item.raw||{};
-                const v = Number(raw.vol) || 0;
-                const t = Number(raw.turnover) || 0;
+                const r=item.raw||{};
+                const v = Number(r.vol)||0;
+                const t = Number(r.turnover)||0;
+                const sign = (endpointSel.value.includes("_dump_")) ? -Math.abs(v)
+                           : (endpointSel.value.includes("_spike_")) ?  Math.abs(v)
+                           : v;
                 return [
-                  `변동성(면적): ${fmtPct(v)}`,
+                  `변동성(면적): ${fmtPct(sign)}`,
                   `거래대금(진하기): ${formatCompact(t)} USDT`
                 ];
               }
@@ -226,12 +232,8 @@
         layout:{ padding:3 }
       };
 
-      if(treemapChart){
-        treemapChart.data.datasets[0]=dataSet;
-        treemapChart.update();
-      }else{
-        treemapChart = new Chart(ctx, { type:'treemap', data:{ datasets:[dataSet] }, options });
-      }
+      if(treemapChart){ treemapChart.data.datasets[0]=dataSet; treemapChart.update(); }
+      else{ treemapChart = new Chart(ctx, { type:'treemap', data:{ datasets:[dataSet] }, options }); }
     }
 
     async function fetchData(path){ const res=await fetch(API_BASE+path,{cache:"no-store"}); return await res.json(); }
@@ -240,8 +242,7 @@
       updateTimeLabel(); secondsToNextUpdate=60;
       const path=endpointSel.value;
       let raw;
-      try{ raw=await fetchData(path); }
-      catch(_){ if(treemapChart){ treemapChart.destroy(); treemapChart=null; } return; }
+      try{ raw=await fetchData(path); } catch(_){ if(treemapChart){ treemapChart.destroy(); treemapChart=null; } return; }
       const data=normalizeData(raw,path);
       renderTreemap(data);
     }
