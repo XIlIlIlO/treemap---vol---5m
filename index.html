@@ -2,17 +2,22 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>SUPERHERO Treemap — Volatility × Turnover (Fixed)</title>
+  <title>SUPERHERO Treemap — Volatility × Turnover (Auto 60s)</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
-    :root { --chart-w: 1280px; --chart-h: 720px; }
+    :root { --scale: 0.70; }
 
     html, body {
       margin: 0; padding: 0;
-      background: #000; color: #fff;
-      font-family: system-ui, -apple-system, Roboto, "Noto Sans KR", sans-serif;
-      width: 100vw; height: 100vh; overflow: hidden;
-      display: grid; place-items: center;
+      background: #000; color: #fff; font-family: system-ui, -apple-system, Roboto, sans-serif;
+      overflow: hidden; width: 100vw; height: 100vh;
+    }
+    body {
+      transform: scale(var(--scale));
+      transform-origin: top left;
+      width: calc(100% / var(--scale));
+      height: calc(100% / var(--scale));
+      padding: calc(28px / var(--scale));
     }
 
     h1 { font-size: 24px; margin: 0 0 12px 0; }
@@ -25,40 +30,30 @@
     #time { font-size: 14px; color: #aaa; }
     #countdown { margin-left: 12px; color: #888; }
 
-    /* ⬇️ 고정 크기 박스 */
-    .frame {
-      width: var(--chart-w);
-      height: var(--chart-h);
-      border: 1px solid #222; border-radius: 10px;
-      background: #050607;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.45);
-      display: grid; grid-template-rows: 56px 1fr; overflow: hidden;
-    }
-    .topbar {
-      display: flex; align-items: center; gap: 16px;
-      padding: 0 16px; border-bottom: 1px solid #17181b;
-    }
-
-    #chartWrap { width: var(--chart-w); height: calc(var(--chart-h) - 56px); }
-    #chart { width: var(--chart-w); height: calc(var(--chart-h) - 56px); display: block; }
+    /* ▼▼▼ 트리맵 '고정 사이즈' (필요 시 값만 변경) ▼▼▼ */
+    :root { --treemap-w: 1280px; --treemap-h: 720px; }
+    #chartWrap { width: var(--treemap-w); height: var(--treemap-h); /* 상단 영역 제외 X: 트리맵만 고정 */ }
+    #chart     { width: var(--treemap-w); height: var(--treemap-h); display: block; border: 1px solid #222; border-radius: 10px; }
+    /* ▲▲▲ */
 
     .cell { cursor: pointer; }
+    /* 샘플 이미지처럼 각진 모서리 + 얇은 경계 */
     .cell rect { rx: 2; ry: 2; stroke: #0f1115; stroke-width: 1; }
 
-    /* 중앙 라벨(큰 타일) */
-    .label-center {
-      fill: #f7f9fb; font-weight: 800; text-anchor: middle;
-      paint-order: stroke; stroke: rgba(0,0,0,.35); stroke-width: 3px; stroke-linejoin: round;
+    /* 큰/중 타일 중앙 라벨 */
+    .label-center{
+      fill:#f7f9fb; font-weight:800; text-anchor:middle;
+      paint-order:stroke; stroke:rgba(0,0,0,.35); stroke-width:3px; stroke-linejoin:round;
     }
-    .pct-center {
-      fill: #eef2f6; font-weight: 700; text-anchor: middle;
-      paint-order: stroke; stroke: rgba(0,0,0,.28); stroke-width: 2px; stroke-linejoin: round;
+    .pct-center{
+      fill:#eef2f6; font-weight:700; text-anchor:middle;
+      paint-order:stroke; stroke:rgba(0,0,0,.28); stroke-width:2px; stroke-linejoin:round;
     }
 
-    /* 작은 타일 좌상단 텍스트 */
-    .small {
-      fill: #e6ebf2; font-weight: 700; font-size: 11px;
-      paint-order: stroke; stroke: rgba(0,0,0,.25); stroke-width: 2px; stroke-linejoin: round;
+    /* 작은 타일 좌상단 라벨 */
+    .tiny{
+      fill:#e6ebf2; font-weight:700; font-size:11px;
+      paint-order:stroke; stroke:rgba(0,0,0,.25); stroke-width:2px; stroke-linejoin:round;
     }
 
     .tooltip {
@@ -68,7 +63,6 @@
       box-shadow: 0 6px 16px rgba(0,0,0,0.35);
       display:none; opacity:0;
     }
-
     .legend { font-size: 12px; color: #bbb; display:flex; gap:16px; align-items:center; }
     .chip { width:14px; height:14px; border-radius: 3px; display:inline-block; margin-right:6px; border:1px solid #333; }
     .chip.up { background:#afff00; }
@@ -76,51 +70,51 @@
   </style>
 </head>
 <body>
-  <div class="frame">
-    <div class="topbar">
-      <h1 style="font-size:18px; margin:0;">■ SUPERHERO 실시간 트리맵 (면적=거래대금, 색상=등락, 진하기=변동) ■</h1>
-      <div class="legend" style="margin-left:auto;">
-        <span><span class="chip up"></span>상승</span>
-        <span><span class="chip down"></span>하락</span>
-        <label for="endpoint" style="margin-left:12px;">엔드포인트:</label>
-        <select id="endpoint">
-          <option value="/top_volatility_1m">1분 변동성</option>
-          <option value="/top_volatility_5m" selected>5분 변동성</option>
-          <option value="/top_volatility_15m">15분 변동성</option>
-          <option value="/top_volatility_1h">1시간 변동성</option>
-          <option value="/top_spike_1h_recent">신규코인 급등(1H)</option>
-          <option value="/top_dump_1h_recent">신규코인 급락(1H)</option>
-          <option value="/top_spike_1h_all">전종목 급등(1H)</option>
-          <option value="/top_dump_1h_all">전종목 급락(1H)</option>
-        </select>
-        <span id="time">UTC 로딩 중...</span>
-        <span id="countdown">다음 갱신까지 60s</span>
-      </div>
-    </div>
+  <h1>■ SUPERHERO 실시간 트리맵 (면적=거래대금, 색상=등락, 진하기=변동성) ■</h1>
 
-    <div id="chartWrap">
-      <svg id="chart"></svg>
+  <div class="row">
+    <div class="legend">
+      <span><span class="chip up"></span>상승</span>
+      <span><span class="chip down"></span>하락</span>
+      <span>진하기 ↑ = 변동성(%) ↑</span>
+      <span>면적 ↑ = 거래대금(USDT) ↑</span>
     </div>
+  </div>
+
+  <div class="row">
+    <label for="endpoint">엔드포인트:</label>
+    <select id="endpoint">
+      <!-- 변동성 랭킹 계열 -->
+      <option value="/top_volatility_1m">1분 변동성</option>
+      <option value="/top_volatility_5m" selected>5분 변동성</option>
+      <option value="/top_volatility_15m">15분 변동성</option>
+      <option value="/top_volatility_1h">1시간 변동성</option>
+      <!-- 신규코인 급등/급락 (≤6개월) -->
+      <option value="/top_spike_1h_recent">신규코인 급등(1H)</option>
+      <option value="/top_dump_1h_recent">신규코인 급락(1H)</option>
+      <!-- 전종목 급등/급락 -->
+      <option value="/top_spike_1h_all">전종목 급등(1H)</option>
+      <option value="/top_dump_1h_all">전종목 급락(1H)</option>
+    </select>
+
+    <span id="time">UTC 로딩 중...</span>
+    <span id="countdown">다음 갱신까지 60s</span>
+  </div>
+
+  <div id="chartWrap">
+    <svg id="chart"></svg>
   </div>
 
   <div id="tooltip" class="tooltip"></div>
 
   <script>
+    // ====== 기본 API 베이스 ======
     const API_BASE = "https://binance-flask-app-production.up.railway.app";
+
+    // ====== 셀렉터와 UI 타이머 ======
     const endpointSel = document.getElementById("endpoint");
-    const tooltip = document.getElementById("tooltip");
-    const svg = d3.select("#chart");
-
-    // 고정 사이즈
-    function sizeSVG() {
-      const w = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--chart-w'));
-      const h = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--chart-h')) - 56;
-      svg.attr("width", w).attr("height", h);
-      return { w, h };
-    }
-
-    // 시간/카운트다운
     let secondsToNextUpdate = 60;
+
     function updateTimeLabel() {
       const now = new Date();
       const y = now.getUTCFullYear();
@@ -130,33 +124,45 @@
       const mm = String(now.getUTCMinutes()).padStart(2, '0');
       document.getElementById("time").textContent = `${y}-${m}-${d} ${h}:${mm} UTC`;
     }
-    setInterval(() => {
-      secondsToNextUpdate--;
-      if (secondsToNextUpdate <= 0) secondsToNextUpdate = 60;
-      document.getElementById("countdown").textContent = `다음 갱신까지 ${secondsToNextUpdate}s`;
-    }, 1000);
+    function startCountdown() {
+      setInterval(() => {
+        secondsToNextUpdate--;
+        if (secondsToNextUpdate <= 0) secondsToNextUpdate = 60;
+        document.getElementById("countdown").textContent = `다음 갱신까지 ${secondsToNextUpdate}s`;
+      }, 1000);
+    }
 
-    // 유틸
+    // ====== 유틸 ======
     const fmtPct = v => `${(+v).toFixed(2)}%`;
     function formatCompact(num) {
       const n = +num || 0;
-      if (n >= 1e12) return (n/1e12).toFixed(2) + "T";
-      if (n >= 1e9 ) return (n/1e9 ).toFixed(2) + "B";
-      if (n >= 1e6 ) return (n/1e6 ).toFixed(2) + "M";
-      if (n >= 1e3 ) return (n/1e3 ).toFixed(2) + "K";
+      if (n >= 1e12) return (n / 1e12).toFixed(2) + "T";
+      if (n >= 1e9)  return (n / 1e9 ).toFixed(2) + "B";
+      if (n >= 1e6)  return (n / 1e6 ).toFixed(2) + "M";
+      if (n >= 1e3)  return (n / 1e3 ).toFixed(2) + "K";
       return n.toFixed(0);
     }
     const colorBase = c => (c === "green" ? "#afff00" : "#f73f21");
+
+    // 색 진하기를 변동성(%)에 맞춰 보정 (0~1) → 0.30~1.00
     function intensity(volPct, maxVol) {
       if (maxVol <= 0) return 0.6;
       const r = Math.max(0, Math.min(1, volPct / maxVol));
-      return 0.30 + r * 0.70; // 0.30~1.00
+      return 0.30 + r * 0.70;
     }
-    async function fetchData(path) {
-      const url = API_BASE + path;
-      const res = await fetch(url, { cache: "no-store" });
-      return await res.json();
+
+    // ====== SVG 및 레이아웃 (고정 사이즈) ======
+    const svg = d3.select("#chart");
+    function sizeSVG() {
+      const w = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--treemap-w'));
+      const h = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--treemap-h'));
+      svg.attr("width", w).attr("height", h);
+      return { w, h };
     }
+
+    // ====== 데이터 표준화 ======
+    // 변동성 계열: [{symbol, volatility, color, volume_usdt}]
+    // 급등/급락 계열: spike_pct/dump_pct + volume_usdt_1h, color
     function normalizeData(raw, endpointPath) {
       const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
       const isSpike = endpointPath.includes("_spike_");
@@ -176,7 +182,20 @@
       }).filter(d => d.symbol && d.volume_usdt >= 0 && d.volatility >= 0);
     }
 
-    // 렌더(이미지 스타일)
+    // ====== Treemap 렌더링 (샘플 스타일) ======
+    const tooltip = document.getElementById("tooltip");
+    function showTip(html, x, y) {
+      tooltip.innerHTML = html;
+      tooltip.style.left = (x + 12) + "px";
+      tooltip.style.top  = (y + 12) + "px";
+      tooltip.style.opacity = 1;
+      tooltip.style.display = "block";
+    }
+    function hideTip() {
+      tooltip.style.opacity = 0;
+      tooltip.style.display = "none";
+    }
+
     function renderTreemap(data) {
       const { w, h } = sizeSVG();
       svg.selectAll("*").remove();
@@ -184,13 +203,14 @@
 
       const maxVol = d3.max(data, d => Math.max(0, d.volatility || 0));
 
+      // 면적 = 거래대금, 얇은 격자
       const root = d3.hierarchy({ name: "root", children: data })
         .sum(d => Math.max(0.0001, d.volume_usdt))
         .sort((a,b) => (b.data.volatility||0) - (a.data.volatility||0));
 
       d3.treemap()
         .size([w, h])
-        .paddingInner(2)   /* 얇은 그리드 */
+        .paddingInner(2)
         .paddingOuter(2)
         .round(true)(root);
 
@@ -200,29 +220,31 @@
         .attr("class", "cell")
         .attr("transform", d => `translate(${d.x0},${d.y0})`)
         .on("mousemove", (event, d) => {
-          const { symbol, volatility, volume_usdt } = d.data;
-          tooltip.innerHTML =
-            `<b>${symbol}</b><br/>변화: <b>${fmtPct(volatility)}</b><br/>거래대금: <b>${formatCompact(volume_usdt)}</b> USDT`;
-          tooltip.style.left = (event.clientX + 12) + "px";
-          tooltip.style.top  = (event.clientY + 12) + "px";
-          tooltip.style.display = "block"; tooltip.style.opacity = 1;
+          const sym = d.data.symbol;
+          const vol = d.data.volatility;
+          const usd = d.data.volume_usdt;
+          showTip(
+            `<b>${sym}</b><br/>변동성: <b>${fmtPct(vol)}</b><br/>거래대금: <b>${formatCompact(usd)}</b> USDT`,
+            event.clientX, event.clientY
+          );
         })
-        .on("mouseleave", () => { tooltip.style.opacity = 0; tooltip.style.display = "none"; })
-        .on("click", (event, d) => window.open(`https://www.binance.com/en/futures/${d.data.symbol}`, "_blank"));
+        .on("mouseleave", hideTip)
+        .on("click", (event, d) => {
+          const url = `https://www.binance.com/en/futures/${d.data.symbol}`;
+          window.open(url, "_blank");
+        });
 
-      // 배경 사각형
+      // 배경 사각형(색 진하기 = 변동성 비례)
       cell.append("rect")
         .attr("width", d => Math.max(0, d.x1 - d.x0))
         .attr("height", d => Math.max(0, d.y1 - d.y0))
         .attr("fill", d => {
-          const base = colorBase(d.data.color);
-          const inten = intensity(d.data.volatility || 0, maxVol);
-          // 진하기 반영
-          const c = d3.color(base);
-          c.r = Math.round(c.r * inten);
-          c.g = Math.round(c.g * inten);
-          c.b = Math.round(c.b * inten);
-          return c.formatHex();
+          const base = d3.color(colorBase(d.data.color));
+          const f = intensity(d.data.volatility || 0, maxVol); // 0.30~1.00
+          base.r = Math.round(base.r * f);
+          base.g = Math.round(base.g * f);
+          base.b = Math.round(base.b * f);
+          return base.formatHex();
         });
 
       // 중심 좌표/크기
@@ -231,11 +253,11 @@
       const ww = d => (d.x1 - d.x0);
       const hh = d => (d.y1 - d.y0);
 
-      // 임계값(첨부 이미지 느낌)
-      const BIG_W = 260, BIG_H = 160;
+      // 임계값: 큰 타일(중앙 심볼+%), 작은 타일(좌상단 2줄)
+      const BIG_W = 240, BIG_H = 140;
       const MED_W = 120, MED_H = 80;
 
-      // 중앙 심볼
+      // 큰/중 타일: 중앙 심볼
       cell.append("text")
         .attr("class", "label-center")
         .attr("x", d => cx(d))
@@ -244,13 +266,9 @@
           const s = Math.min(Math.max(16, ww(d) * 0.18), 42);
           return s + "px";
         })
-        .text(d => {
-          if (ww(d) >= MED_W && hh(d) >= MED_H) return d.data.symbol;
-          if (ww(d) >= BIG_W && hh(d) >= BIG_H) return d.data.symbol;
-          return ""; // 작은 타일은 중앙 라벨 숨김
-        });
+        .text(d => (ww(d) >= MED_W && hh(d) >= MED_H) ? d.data.symbol : "");
 
-      // 중앙 퍼센트
+      // 큰/중 타일: 중앙 퍼센트
       cell.append("text")
         .attr("class", "pct-center")
         .attr("x", d => cx(d))
@@ -265,21 +283,26 @@
           return "";
         });
 
-      // 작은 타일(좌상단): 심볼 + % (한 줄)
-      const small = cell.append("g")
-        .filter(d => ww(d) < MED_W || hh(d) < MED_H);
-
+      // 작은 타일: 좌상단 심볼 + % (두 줄)
+      const small = cell.filter(d => ww(d) < MED_W || hh(d) < MED_H);
       small.append("text")
-        .attr("class", "small")
+        .attr("class", "tiny")
         .attr("x", d => d.x0 + 6)
         .attr("y", d => d.y0 + 14)
         .text(d => d.data.symbol);
 
       small.append("text")
-        .attr("class", "small")
+        .attr("class", "tiny")
         .attr("x", d => d.x0 + 6)
         .attr("y", d => d.y0 + 28)
         .text(d => (d.data.color==="green" ? "+" : "−") + d.data.volatility.toFixed(2) + "%");
+    }
+
+    // ====== 데이터 가져오기 & 주기 갱신 ======
+    async function fetchData(path) {
+      const url = API_BASE + path;
+      const res = await fetch(url, { cache: "no-store" });
+      return await res.json();
     }
 
     async function refresh() {
@@ -288,21 +311,25 @@
 
       const path = endpointSel.value;
       let raw;
-      try { raw = await fetchData(path); }
-      catch { renderTreemap([]); return; }
+      try {
+        raw = await fetchData(path);
+      } catch (_) {
+        renderTreemap([]); return;
+      }
       const data = normalizeData(raw, path);
       renderTreemap(data);
     }
 
     // 최초 실행 & 인터벌
     refresh();
+    startCountdown();
     setInterval(refresh, 60 * 1000);
 
     // 엔드포인트 전환 즉시 갱신
     endpointSel.addEventListener("change", refresh);
 
-    // 반응형 제거(요청): 리사이즈 리렌더링 없음
-    // window.addEventListener("resize", () => refresh());
+    // 반응형은 유지 안 해도 되지만, 있어도 고정 사이즈로 렌더됨
+    window.addEventListener("resize", () => refresh());
   </script>
 </body>
 </html>
