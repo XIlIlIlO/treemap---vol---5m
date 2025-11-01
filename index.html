@@ -135,27 +135,34 @@
       };
 
       const dataSet = {
-        label:"SUPERHERO",
-        tree,
-        key:"area",
-        groups:["displayValue"],
-        spacing:2,
-        borderWidth:1,
-        borderColor:"rgba(10,10,10,0.9)",
-        backgroundColor,
-        // ★ 라벨 활성화
-        labels:{
-          display:true,
-          formatter:(ctx)=>ctx.raw.displayValue,
-          color:'#eef2f6',
-          align:'center',
-          font:(ctx)=>{
-            const base = Math.min(ctx.raw._data.w, ctx.raw._data.h);
-            const size = Math.max(12, Math.min(42, base*0.16));
-            return { size, weight:'800' };
-          }
-        }
-      };
+  label: "SUPERHERO",
+  tree,
+  key: "area",
+  // groups: ["displayValue"],   // ⛔️ 제거 (그룹 라벨로 뭉개지면서 안 보였던 원인)
+  spacing: 2,
+  borderWidth: 1,
+  borderColor: "rgba(10,10,10,0.9)",
+  backgroundColor,
+
+  // ✅ 중앙 2줄 라벨 (심볼 + 퍼센트)
+  labels: {
+    display: true,
+    formatter: ({ raw }) => {
+      const sign = raw.color === "green" ? "+" : "−";
+      const pct  = (raw.vol ?? raw.volatility ?? 0);
+      return `${raw.symbol}\n${sign}${(+pct).toFixed(2)}%`;
+    },
+    color: "#eef2f6",
+    align: "center",
+    // 동적 ctx.raw._data 의존 X → 안정적 표기
+    font: { size: 18, weight: "800" },
+    minFontSize: 10,
+    lineHeight: 1.15,
+    padding: 2,
+    overflow: "hidden"
+  }
+};
+
 
       const options={
         maintainAspectRatio:false,
