@@ -29,14 +29,14 @@
   </style>
 </head>
 <body>
-  <h1>■ SUPERHERO 실시간 트리맵 (면적=거래대금, 색상=등락, 진하기=변동성) ■</h1>
+  <h1>■ SUPERHERO 실시간 트리맵 (면적=변동성, 색상=등락, 진하기=거래대금) ■</h1>
 
   <div class="row">
     <div class="legend">
       <span><span class="chip up"></span>상승</span>
       <span><span class="chip down"></span>하락</span>
-      <span>진하기 ↑ = 변동성(%) ↑</span>
-      <span>면적 ↑ = 거래대금(USDT) ↑</span>
+      <span>진하기 ↑ = 거래대금(USDT) ↑</span>
+      <span>면적 ↑ = 변동성(%) ↑</span>
     </div>
   </div>
 
@@ -65,14 +65,31 @@
     const endpointSel = document.getElementById("endpoint");
     let secondsToNextUpdate = 60;
 
-    function updateTimeLabel(){ const n=new Date(); const y=n.getUTCFullYear(); const m=String(n.getUTCMonth()+1).padStart(2,'0'); const d=String(n.getUTCDate()).padStart(2,'0'); const h=String(n.getUTCHours()).padStart(2,'0'); const mm=String(n.getUTCMinutes()).padStart(2,'0'); document.getElementById("time").textContent=`${y}-${m}-${d} ${h}:${mm} UTC`; }
-    function startCountdown(){ setInterval(()=>{ secondsToNextUpdate--; if(secondsToNextUpdate<=0) secondsToNextUpdate=60; document.getElementById("countdown").textContent=`다음 갱신까지 ${secondsToNextUpdate}s`; },1000); }
+    function updateTimeLabel(){
+      const n=new Date(); const y=n.getUTCFullYear();
+      const m=String(n.getUTCMonth()+1).padStart(2,'0');
+      const d=String(n.getUTCDate()).padStart(2,'0');
+      const h=String(n.getUTCHours()).padStart(2,'0');
+      const mm=String(n.getUTCMinutes()).padStart(2,'0');
+      document.getElementById("time").textContent=`${y}-${m}-${d} ${h}:${mm} UTC`;
+    }
+    function startCountdown(){
+      setInterval(()=>{ secondsToNextUpdate--; if(secondsToNextUpdate<=0) secondsToNextUpdate=60;
+        document.getElementById("countdown").textContent=`다음 갱신까지 ${secondsToNextUpdate}s`; },1000);
+    }
 
     const fmtPct = v => `${(+v).toFixed(2)}%`;
-    function formatCompact(num){ const n=+num||0; if(n>=1e12) return (n/1e12).toFixed(2)+"T"; if(n>=1e9) return (n/1e9).toFixed(2)+"B"; if(n>=1e6) return (n/1e6).toFixed(2)+"M"; if(n>=1e3) return (n/1e3).toFixed(2)+"K"; return n.toFixed(0); }
+    function formatCompact(num){
+      const n=+num||0;
+      if(n>=1e12) return (n/1e12).toFixed(2)+"T";
+      if(n>=1e9)  return (n/1e9 ).toFixed(2)+"B";
+      if(n>=1e6)  return (n/1e6 ).toFixed(2)+"M";
+      if(n>=1e3)  return (n/1e3 ).toFixed(2)+"K";
+      return n.toFixed(0);
+    }
     const colorBaseHex = c => (c==="green" ? "#2db84d" : "#c6453a");
-    function intensity(volPct,maxVol){ if(maxVol<=0) return 0.6; const r=Math.max(0,Math.min(1,volPct/maxVol)); return 0.30+r*0.70; }
 
+    // ── 원시 데이터 정규화
     function normalizeData(raw, endpointPath){
       const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
       const isSpike = endpointPath.includes("_spike_");
@@ -86,83 +103,88 @@
       }).filter(d=>d.symbol && d.volume_usdt>=0 && d.volatility>=0);
     }
 
+    // ── 레이아웃 선택(이제 '변동성'을 면적 기준으로 사용)
     const TREEMAP_MAX_ITEMS=28, MIN_AREA_RATIO=0.01;
     function selectForLayout(data, w, h){
-      const total=data.reduce((s,d)=>s+(d.volume_usdt||0),0);
-      const area=w*h, minArea=area*MIN_AREA_RATIO;
-      const sorted=data.slice().sort((a,b)=>(b.volume_usdt||0)-(a.volume_usdt||0));
-      const picked=[];
+      const areaMetric = d => Math.abs(d.volatility||0);        // 면적 기준 = |변동성|
+      const totalAreaMetric = data.reduce((s,d)=>s+areaMetric(d),0);
+      const area = w*h, minArea = area*MIN_AREA_RATIO;
+
+      const sorted = data.slice().sort((a,b)=>areaMetric(b)-areaMetric(a));
+      const picked = [];
       for(const d of sorted){
         if(picked.length>=TREEMAP_MAX_ITEMS) break;
-        const est= total>0 ? (d.volume_usdt/total)*area : 0;
+        const est = totalAreaMetric>0 ? (areaMetric(d)/totalAreaMetric)*area : 0;
         if(est>=minArea) picked.push(d);
       }
       if(!picked.length && sorted.length) picked.push(sorted[0]);
-      return {picked, total};
+      return {picked, totalAreaMetric};
     }
 
     let treemapChart=null;
+
     function renderTreemap(data){
       const w=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--treemap-w'));
       const h=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--treemap-h'));
 
-      const {picked, total} = selectForLayout(data, w, h);
-      const maxVol = Math.max(...picked.map(d=>d.volatility||0), 0);
+      // 면적=변동성 기준으로 선택
+      const {picked, totalAreaMetric} = selectForLayout(data, w, h);
 
-      // tree 데이터 + 라벨 텍스트
+      // 진하기(밝기) 계산용 최대 거래대금
+      const maxTurnover = Math.max(...picked.map(d=>+d.volume_usdt||0), 0);
+
+      // tree 데이터 구성
       const tree = picked.map(d=>{
         const sign = d.color==='green' ? '+' : '−';
+        const areaVal = Math.max(0.001, Math.abs(d.volatility||0)); // 0 보호
         return {
           symbol: d.symbol,
-          area: d.volume_usdt,
+          area: areaVal,                 // ✔ 면적 = 변동성(|vol|)
           vol: d.volatility,
+          turnover: d.volume_usdt,       // ✔ 진하기 기준으로 사용
           color: d.color,
-          displayValue: `${d.symbol}\n${sign}${d.volatility.toFixed(2)}%`,
-          _data: { w: w*(d.volume_usdt/Math.max(total,1)), h } // 라벨 폰트 산정용 대략치
+          displayValue: `${d.symbol}\n${sign}${(d.volatility||0).toFixed(2)}%`,
+          // 라벨 폰트 산정 보조치(근사)
+          _data: { w: w*(areaVal/Math.max(totalAreaMetric,1)), h }
         };
       });
 
       const ctx=document.getElementById("chart-area").getContext("2d");
 
+      // ✔ 배경색 진하기 = 거래대금 비례(0.55 ~ 0.95)
       const backgroundColor = (c)=>{
         const raw=c.raw||{};
         const base=colorBaseHex(raw.color||"green");
         const r=parseInt(base.slice(1,3),16);
         const g=parseInt(base.slice(3,5),16);
         const b=parseInt(base.slice(5,7),16);
-        const f=intensity(raw.vol||0,maxVol);
+        const ratio = maxTurnover>0 ? Math.min(1, (raw.turnover||0)/maxTurnover) : 0;
+        const f = 0.55 + 0.40 * ratio;    // 밝기 가중
         return `rgba(${Math.round(r*f)},${Math.round(g*f)},${Math.round(b*f)},1)`;
       };
 
       const dataSet = {
-  label: "SUPERHERO",
-  tree,
-  key: "area",
-  // groups: ["displayValue"],   // ⛔️ 제거 (그룹 라벨로 뭉개지면서 안 보였던 원인)
-  spacing: 2,
-  borderWidth: 1,
-  borderColor: "rgba(10,10,10,0.9)",
-  backgroundColor,
-
-  // ✅ 중앙 2줄 라벨 (심볼 + 퍼센트)
-  labels: {
-    display: true,
-    formatter: ({ raw }) => {
-      const sign = raw.color === "green" ? "+" : "−";
-      const pct  = (raw.vol ?? raw.volatility ?? 0);
-      return `${raw.symbol}\n${sign}${(+pct).toFixed(2)}%`;
-    },
-    color: "#eef2f6",
-    align: "center",
-    // 동적 ctx.raw._data 의존 X → 안정적 표기
-    font: { size: 18, weight: "800" },
-    minFontSize: 10,
-    lineHeight: 1.15,
-    padding: 2,
-    overflow: "hidden"
-  }
-};
-
+        label:"SUPERHERO",
+        tree,
+        key:"area",                 // ✔ 면적 = area(변동성)
+        spacing:2,
+        borderWidth:1,
+        borderColor:"rgba(10,10,10,0.9)",
+        backgroundColor,
+        labels:{
+          display:true,
+          formatter:(ctx)=>ctx.raw.displayValue,  // "SYMBOL\n+1.23%"
+          color:'#eef2f6',
+          align:'center',
+          font:(ctx)=>{
+            const base = Math.min(ctx.raw._data.w, ctx.raw._data.h);
+            const size = Math.max(12, Math.min(42, base*0.16));
+            return { size, weight:'800', lineHeight:1.15 };
+          },
+          padding:2,
+          overflow:'hidden'
+        }
+      };
 
       const options={
         maintainAspectRatio:false,
@@ -173,7 +195,10 @@
               title:(items)=> (items[0].raw?.symbol)||'',
               label:(item)=>{
                 const raw=item.raw||{};
-                return [`변동성: ${(+raw.vol).toFixed(2)}%`, `거래대금: ${formatCompact(raw.area)} USDT`];
+                return [
+                  `변동성(면적): ${(+raw.vol).toFixed(2)}%`,
+                  `거래대금(진하기): ${formatCompact(raw.turnover)} USDT`
+                ];
               }
             }
           }
