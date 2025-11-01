@@ -200,28 +200,33 @@
     const norm = makeTurnoverNormalizer(turnovers); // 0~1
 
     const tree = picked.map(d=>{
-      const vol = Number(d.volatility)||0;
-      const areaVal = Math.max(0.001, Math.abs(vol));
-      const turnover = Math.max(0, Number(d.volume_usdt)||0);
-      const sign = (d.rawColor === 'red' ? '−' : '+');  // ← 부호를 색에서 생성
-      const displayValue = `${d.symbol} ${sign}${Math.abs(vol).toFixed(2)}%`;
-      return {
+    const vol = Number(d.volatility)||0;
+    const areaVal = Math.max(0.001, Math.abs(vol));   // 면적 값
+    const turnover = Math.max(0, Number(d.volume_usdt)||0);
+    const sign = (d.rawColor === 'red' ? '−' : '+');
+    const displayValue = `${d.symbol} ${sign}${Math.abs(vol).toFixed(2)}%`;
+    return {
+      // ✅ treemap 표준 키
+      g: displayValue,       // 라벨
+      v: areaVal,            // 면적
+      // ✅ 커스텀 값은 전부 _m 안에 보존
+      _m: {
         symbol: d.symbol,
-        area: areaVal,
         vol,
         turnover,
         colorHex: d.colorHex,
         rawColor: d.rawColor,
-        displayValue,
-        _data: { w: w*(areaVal/Math.max(totalAreaMetric,1)), h }
-      };
-    });
+        approxW: w*(areaVal/Math.max(totalAreaMetric,1)),
+        approxH: h
+      }
+    };
+  });
 
     const ctx=document.getElementById("chart-area").getContext("2d");
 
-    const backgroundColor = (c)=>{
-      const raw = c.raw || {};
-      const {r,g,b} = hexToRgb(raw.colorHex || "#2db84d");
+      const backgroundColor = (c)=>{
+    const raw = c.raw?._m || {};
+    const {r,g,b} = hexToRgb(raw.colorHex || "#2db84d");
       const {h,s} = rgbToHsl(r,g,b);
       const l = 0.35 + 0.43 * norm(raw.turnover); // Lightness 35%~78%
       const rgb = hslToRgb(h,s,l);
@@ -231,15 +236,15 @@
     const dataSet = {
       label:"SUPERHERO",
       tree,
-      key:"area",
-      groups:["displayValue"],
+      key:"v",            // ✅ 면적 키
+      groups:["g"],       // ✅ 라벨 키
       spacing:2,
       borderWidth:1,
       borderColor:"rgba(10,10,10,0.9)",
       backgroundColor,
       labels:{
         display:true,
-        formatter:(ctx)=> ctx.raw?.displayValue || "",
+         formatter:(ctx)=> ctx.raw?.g || "",
         color:'#eef2f6',
         align:'center',
         font:(ctx)=>{
@@ -259,12 +264,12 @@
         legend:{ display:false },
         tooltip:{
           callbacks:{
-            title:(items)=> (items[0].raw?.symbol)||'',
+            title:(items)=> (items[0].raw?._m?.symbol)||'',
             label:(item)=>{
-              const raw=item.raw||{};
+              const raw=item.raw?._m||{};
               return [
-                `변동성(면적): ${fmtPct(Number(raw.vol)||0)}`,
-                `거래대금(진하기): ${formatCompact(Number(raw.turnover)||0)} USDT`
+                `변동성(면적): ${fmtPct(+raw.vol||0)}`,
+                `거래대금(진하기): ${formatCompact(+raw.turnover||0)} USDT`
               ];
             }
           }
