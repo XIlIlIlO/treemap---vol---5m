@@ -78,7 +78,7 @@
         document.getElementById("countdown").textContent=`다음 갱신까지 ${secondsToNextUpdate}s`; },1000);
     }
 
-    const fmtPct = v => `${(+v).toFixed(2)}%`;
+    const fmtPct = v => `${(Number(v)||0).toFixed(2)}%`;
     function formatCompact(num){
       const n=+num||0;
       if(n>=1e12) return (n/1e12).toFixed(2)+"T";
@@ -87,7 +87,9 @@
       if(n>=1e3)  return (n/1e3 ).toFixed(2)+"K";
       return n.toFixed(0);
     }
-    const colorBaseHex = c => (c==="green" ? "#2db84d" : "#c6453a");
+    const GREEN = "#2db84d";
+    const RED   = "#c6453a";
+    const colorBaseHexFromVol = vol => (Number(vol) >= 0 ? GREEN : RED);
 
     // ── 원시 데이터 정규화
     function normalizeData(raw, endpointPath){
@@ -95,18 +97,20 @@
       const isSpike = endpointPath.includes("_spike_");
       const isDump  = endpointPath.includes("_dump_");
       return arr.map(d=>{
-        let vol=0, volUSD=0, col=d.color;
-        if("volatility" in d){ vol=+d.volatility||0; volUSD=+d.volume_usdt||0; }
-        else { if(isSpike) vol=+d.spike_pct||0; if(isDump) vol=+d.dump_pct||0; volUSD=+d.volume_usdt_1h||0; }
+        let vol=0, volUSD=0;
+        if("volatility" in d){ vol=Number(d.volatility)||0; volUSD=Number(d.volume_usdt)||0; }
+        else { if(isSpike) vol=Number(d.spike_pct)||0; if(isDump) vol=Number(d.dump_pct)||0; volUSD=Number(d.volume_usdt_1h)||0; }
         const sym=d.symbol||d.futures_symbol||d.name||"NA";
-        return { symbol:sym, volatility:vol, volume_usdt:volUSD, color:col||"green" };
-      }).filter(d=>d.symbol && d.volume_usdt>=0 && d.volatility>=0);
+        // 색상은 '부호'로 직접 산정 (API color 무시/보정)
+        const col = vol >= 0 ? "green" : "red";
+        return { symbol:sym, volatility:vol, volume_usdt:volUSD, color:col };
+      }).filter(d=>d.symbol);
     }
 
     // ── 레이아웃 선택(면적=변동성)
     const TREEMAP_MAX_ITEMS=28, MIN_AREA_RATIO=0.01;
     function selectForLayout(data, w, h){
-      const areaMetric = d => Math.abs(d.volatility||0);        // 면적 기준 = |변동성|
+      const areaMetric = d => Math.abs(Number(d.volatility)||0);  // 면적 기준 = |변동성|
       const totalAreaMetric = data.reduce((s,d)=>s+areaMetric(d),0);
       const area = w*h, minArea = area*MIN_AREA_RATIO;
 
@@ -127,40 +131,46 @@
       const w=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--treemap-w'));
       const h=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--treemap-h'));
 
-      // 면적=변동성 기준으로 선택
       const {picked, totalAreaMetric} = selectForLayout(data, w, h);
 
-      // 진하기(밝기) 계산용 최대 거래대금
-      const maxTurnover = Math.max(...picked.map(d=>+d.volume_usdt||0), 0);
+      // ── 진하기: 거래대금 log 스케일 정규화
+      const turnovers = picked.map(d => Math.max(0, Number(d.volume_usdt)||0));
+      const logVals = turnovers.map(v => Math.log1p(v));
+      const logMin = Math.min(...logVals, 0);
+      const logMax = Math.max(...logVals, 1);
+      const normTurnover = v => {
+        const t = Math.log1p(Math.max(0, Number(v)||0));
+        return (t - logMin) / Math.max(1e-9, (logMax - logMin)); // 0~1
+      };
 
       // tree 데이터 구성
       const tree = picked.map(d=>{
-        const sign = d.color==='green' ? '+' : '−';
-        const areaVal = Math.max(0.001, Math.abs(d.volatility||0)); // 0 보호
-        const displayValue = `${d.symbol} ${sign}${(d.volatility||0).toFixed(2)}%`;
+        const vol = Number(d.volatility)||0;
+        const sign = vol >= 0 ? '+' : '−';
+        const areaVal = Math.max(0.001, Math.abs(vol)); // 0 보호
+        const turnover = Math.max(0, Number(d.volume_usdt)||0);
+        const displayValue = `${d.symbol} ${sign}${Math.abs(vol).toFixed(2)}%`;
         return {
           symbol: d.symbol,
           area: areaVal,                 // ✔ 면적 = 변동성(|vol|)
-          vol: d.volatility,
-          turnover: d.volume_usdt,       // ✔ 진하기 기준
-          color: d.color,
+          vol,
+          turnover,
+          color: vol >= 0 ? "green" : "red",
           displayValue,
-          // 라벨 폰트 산정 보조치(근사)
           _data: { w: w*(areaVal/Math.max(totalAreaMetric,1)), h }
         };
       });
 
       const ctx=document.getElementById("chart-area").getContext("2d");
 
-      // ✔ 배경색 진하기 = 거래대금 비례(0.55 ~ 0.95)
+      // ✔ 배경색 진하기 = 거래대금 비례(로그 정규화, 0.50~0.98)
       const backgroundColor = (c)=>{
         const raw=c.raw||{};
-        const base=colorBaseHex(raw.color||"green");
+        const base=colorBaseHexFromVol(raw.vol);
         const r=parseInt(base.slice(1,3),16);
         const g=parseInt(base.slice(3,5),16);
         const b=parseInt(base.slice(5,7),16);
-        const ratio = maxTurnover>0 ? Math.min(1, (raw.turnover||0)/maxTurnover) : 0;
-        const f = 0.55 + 0.40 * ratio;    // 밝기 가중
+        const f = 0.50 + 0.48 * normTurnover(raw.turnover);
         return `rgba(${Math.round(r*f)},${Math.round(g*f)},${Math.round(b*f)},1)`;
       };
 
@@ -168,14 +178,13 @@
         label:"SUPERHERO",
         tree,
         key:"area",                       // ✔ 면적 = area(변동성)
-        groups:["displayValue"],          // ✔ 라벨용 그룹(필수)
+        groups:["displayValue"],          // ✔ 라벨 텍스트 소스
         spacing:2,
         borderWidth:1,
         borderColor:"rgba(10,10,10,0.9)",
         backgroundColor,
         labels:{
           display:true,
-          // ✔ displayValue → g(그룹) → symbol 순으로 안전하게
           formatter:(ctx)=>{
             const r = ctx.raw || {};
             return r.displayValue || r.g || r.symbol || "";
@@ -184,10 +193,10 @@
           align:'center',
           font:(ctx)=>{
             const r = ctx.raw || {};
-            const approxW = r._data?.w || 80;   // 안전한 기본값
+            const approxW = r._data?.w || 80;
             const approxH = r._data?.h || 60;
             const base = Math.min(approxW, approxH);
-            const size = Math.max(12, Math.min(42, base*0.16));
+            const size = Math.max(12, Math.min(48, base*0.16));
             return { size, weight:'800', lineHeight:1.15 };
           },
           padding:2,
@@ -204,9 +213,11 @@
               title:(items)=> (items[0].raw?.symbol)||'',
               label:(item)=>{
                 const raw=item.raw||{};
+                const v = Number(raw.vol) || 0;
+                const t = Number(raw.turnover) || 0;
                 return [
-                  `변동성(면적): ${(+raw.vol).toFixed(2)}%`,
-                  `거래대금(진하기): ${formatCompact(raw.turnover)} USDT`
+                  `변동성(면적): ${fmtPct(v)}`,
+                  `거래대금(진하기): ${formatCompact(t)} USDT`
                 ];
               }
             }
