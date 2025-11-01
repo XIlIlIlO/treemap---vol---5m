@@ -2,299 +2,307 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>SUPERHERO Heatmap — Volatility × Turnover</title>
+  <title>SUPERHERO Treemap — Volatility × Turnover (Fixed)</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
-    :root {
-      /* ⇩ 여기만 만지면 크기 변경 (임베드 안정) */
-      --chart-w: 1280px;
-      --chart-h: 720px;
-    }
+    :root { --chart-w: 1280px; --chart-h: 720px; }
+
     html, body {
       margin: 0; padding: 0;
-      background: #0a0b0d; color: #e8e8e8;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans KR", sans-serif;
+      background: #000; color: #fff;
+      font-family: system-ui, -apple-system, Roboto, "Noto Sans KR", sans-serif;
       width: 100vw; height: 100vh; overflow: hidden;
+      display: grid; place-items: center;
     }
-    .wrap {
-      height: 100%; display: grid; place-items: center;
+
+    h1 { font-size: 24px; margin: 0 0 12px 0; }
+    .row { display: flex; gap: 16px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+    label, select { font-size: 14px; color: #ddd; }
+    select {
+      background: #111; color: #fff; border: 1px solid #333; border-radius: 6px; padding: 6px 10px;
+      outline: none;
     }
-    .board {
-      width: var(--chart-w); height: var(--chart-h);
-      background: #060708; border: 1px solid #17191d; border-radius: 10px;
+    #time { font-size: 14px; color: #aaa; }
+    #countdown { margin-left: 12px; color: #888; }
+
+    /* ⬇️ 고정 크기 박스 */
+    .frame {
+      width: var(--chart-w);
+      height: var(--chart-h);
+      border: 1px solid #222; border-radius: 10px;
+      background: #050607;
       box-shadow: 0 8px 24px rgba(0,0,0,0.45);
-      display: grid; grid-template-rows: 56px 1fr;
-      overflow: hidden;
+      display: grid; grid-template-rows: 56px 1fr; overflow: hidden;
     }
     .topbar {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 0 16px; border-bottom: 1px solid #17191d;
+      display: flex; align-items: center; gap: 16px;
+      padding: 0 16px; border-bottom: 1px solid #17181b;
     }
-    .title {
-      font-weight: 800; letter-spacing: .2px; color: #eaeef3; font-size: 18px;
-    }
-    .right { display: flex; align-items: center; gap: 16px; font-size: 13px; color:#a6adbb; }
-    select {
-      background: #0f1217; color: #eaeef3; border: 1px solid #20242c; border-radius: 6px;
-      padding: 6px 10px; outline: none; font-size: 13px;
-    }
-    #countdown { color:#7f8896; }
-    svg { display:block; }
+
+    #chartWrap { width: var(--chart-w); height: calc(var(--chart-h) - 56px); }
+    #chart { width: var(--chart-w); height: calc(var(--chart-h) - 56px); display: block; }
+
     .cell { cursor: pointer; }
-    .cell rect {
-      rx: 6; ry: 6;
-      stroke: #0c0e12; stroke-width: 1; /* 얇은 경계 */
-    }
-    .sym {
+    .cell rect { rx: 2; ry: 2; stroke: #0f1115; stroke-width: 1; }
+
+    /* 중앙 라벨(큰 타일) */
+    .label-center {
       fill: #f7f9fb; font-weight: 800; text-anchor: middle;
       paint-order: stroke; stroke: rgba(0,0,0,.35); stroke-width: 3px; stroke-linejoin: round;
     }
-    .pct {
-      fill: #f1f5f9; font-weight: 700; text-anchor: middle;
+    .pct-center {
+      fill: #eef2f6; font-weight: 700; text-anchor: middle;
       paint-order: stroke; stroke: rgba(0,0,0,.28); stroke-width: 2px; stroke-linejoin: round;
     }
-    .tiny { fill:#e8ecf2; font-weight:700; text-anchor: middle; opacity:.95; }
+
+    /* 작은 타일 좌상단 텍스트 */
+    .small {
+      fill: #e6ebf2; font-weight: 700; font-size: 11px;
+      paint-order: stroke; stroke: rgba(0,0,0,.25); stroke-width: 2px; stroke-linejoin: round;
+    }
+
     .tooltip {
       position: fixed; pointer-events: none; z-index: 50;
-      background: rgba(12,14,18,.96); color: #fff; border: 1px solid #232831; border-radius: 8px;
-      padding: 10px 12px; font-size: 13px; line-height: 1.5;
-      box-shadow: 0 8px 20px rgba(0,0,0,.35);
+      background: rgba(15,15,15,0.92); color: #fff; border: 1px solid #333; border-radius: 8px;
+      padding: 10px 12px; font-size: 13px; line-height: 1.45;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.35);
       display:none; opacity:0;
     }
+
+    .legend { font-size: 12px; color: #bbb; display:flex; gap:16px; align-items:center; }
+    .chip { width:14px; height:14px; border-radius: 3px; display:inline-block; margin-right:6px; border:1px solid #333; }
+    .chip.up { background:#afff00; }
+    .chip.down { background:#f73f21; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="board">
-      <div class="topbar">
-        <div class="title">#CRYPTO — REAL-TIME HEATMAP</div>
-        <div class="right">
-          <label for="endpoint">뷰</label>
-          <select id="endpoint" title="데이터 소스 선택">
-            <option value="/top_volatility_1m">1m 변동성</option>
-            <option value="/top_volatility_5m" selected>5m 변동성</option>
-            <option value="/top_volatility_15m">15m 변동성</option>
-            <option value="/top_volatility_1h">1h 변동성</option>
-            <option value="/top_spike_1h_recent">신규코인 급등(≤6m)</option>
-            <option value="/top_dump_1h_recent">신규코인 급락(≤6m)</option>
-            <option value="/top_spike_1h_all">전종목 급등(1h)</option>
-            <option value="/top_dump_1h_all">전종목 급락(1h)</option>
-          </select>
-          <span id="time">UTC …</span>
-          <span id="countdown">60s</span>
-        </div>
+  <div class="frame">
+    <div class="topbar">
+      <h1 style="font-size:18px; margin:0;">■ SUPERHERO 실시간 트리맵 (면적=거래대금, 색상=등락, 진하기=변동) ■</h1>
+      <div class="legend" style="margin-left:auto;">
+        <span><span class="chip up"></span>상승</span>
+        <span><span class="chip down"></span>하락</span>
+        <label for="endpoint" style="margin-left:12px;">엔드포인트:</label>
+        <select id="endpoint">
+          <option value="/top_volatility_1m">1분 변동성</option>
+          <option value="/top_volatility_5m" selected>5분 변동성</option>
+          <option value="/top_volatility_15m">15분 변동성</option>
+          <option value="/top_volatility_1h">1시간 변동성</option>
+          <option value="/top_spike_1h_recent">신규코인 급등(1H)</option>
+          <option value="/top_dump_1h_recent">신규코인 급락(1H)</option>
+          <option value="/top_spike_1h_all">전종목 급등(1H)</option>
+          <option value="/top_dump_1h_all">전종목 급락(1H)</option>
+        </select>
+        <span id="time">UTC 로딩 중...</span>
+        <span id="countdown">다음 갱신까지 60s</span>
       </div>
-      <div id="stage">
-        <svg id="chart" width="100%" height="100%"></svg>
-      </div>
+    </div>
+
+    <div id="chartWrap">
+      <svg id="chart"></svg>
     </div>
   </div>
 
   <div id="tooltip" class="tooltip"></div>
 
   <script>
-    /* ==============================
-       ❶ 고정 크기 설정
-       ============================== */
-    const CHART_W = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--chart-w'));
-    const CHART_H = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--chart-h'));
-    const svg = d3.select("#chart").attr("width", CHART_W).attr("height", CHART_H);
-
-    /* ==============================
-       ❷ 데이터 소스
-       ============================== */
     const API_BASE = "https://binance-flask-app-production.up.railway.app";
     const endpointSel = document.getElementById("endpoint");
     const tooltip = document.getElementById("tooltip");
+    const svg = d3.select("#chart");
 
-    /* ==============================
-       ❸ 시간 표시 & 카운트다운
-       ============================== */
+    // 고정 사이즈
+    function sizeSVG() {
+      const w = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--chart-w'));
+      const h = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--chart-h')) - 56;
+      svg.attr("width", w).attr("height", h);
+      return { w, h };
+    }
+
+    // 시간/카운트다운
     let secondsToNextUpdate = 60;
-    function updateTimeLabel(){
+    function updateTimeLabel() {
       const now = new Date();
       const y = now.getUTCFullYear();
-      const m = String(now.getUTCMonth()+1).padStart(2,'0');
-      const d = String(now.getUTCDate()).padStart(2,'0');
-      const h = String(now.getUTCHours()).padStart(2,'0');
-      const mm = String(now.getUTCMinutes()).padStart(2,'0');
+      const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(now.getUTCDate()).padStart(2, '0');
+      const h = String(now.getUTCHours()).padStart(2, '0');
+      const mm = String(now.getUTCMinutes()).padStart(2, '0');
       document.getElementById("time").textContent = `${y}-${m}-${d} ${h}:${mm} UTC`;
     }
     setInterval(() => {
-      secondsToNextUpdate = secondsToNextUpdate <= 1 ? 60 : secondsToNextUpdate-1;
-      document.getElementById("countdown").textContent = `${secondsToNextUpdate}s`;
+      secondsToNextUpdate--;
+      if (secondsToNextUpdate <= 0) secondsToNextUpdate = 60;
+      document.getElementById("countdown").textContent = `다음 갱신까지 ${secondsToNextUpdate}s`;
     }, 1000);
 
-    /* ==============================
-       ❹ 유틸
-       ============================== */
+    // 유틸
     const fmtPct = v => `${(+v).toFixed(2)}%`;
-    function kmb(num){
+    function formatCompact(num) {
       const n = +num || 0;
-      if (n >= 1e12) return (n/1e12).toFixed(2)+'T';
-      if (n >= 1e9 ) return (n/1e9 ).toFixed(2)+'B';
-      if (n >= 1e6 ) return (n/1e6 ).toFixed(2)+'M';
-      if (n >= 1e3 ) return (n/1e3 ).toFixed(2)+'K';
+      if (n >= 1e12) return (n/1e12).toFixed(2) + "T";
+      if (n >= 1e9 ) return (n/1e9 ).toFixed(2) + "B";
+      if (n >= 1e6 ) return (n/1e6 ).toFixed(2) + "M";
+      if (n >= 1e3 ) return (n/1e3 ).toFixed(2) + "K";
       return n.toFixed(0);
     }
-    function lerp(a,b,t){ return a + (b-a)*t; }
-    // MSFT/AAPL 스타일의 선명한 녹/적 팔레트 (밝기 가변)
-    const GREEN = [175,255,0];  // #afff00
-    const RED   = [247, 63,33]; // #f73f21
-    function colorMix(baseRGB, factor){
-      // factor 0.25~1.00 범위 권장
-      const f = Math.max(.25, Math.min(1, factor));
-      const [r,g,b] = baseRGB.map(c => Math.round(c * f));
-      return `rgb(${r},${g},${b})`;
+    const colorBase = c => (c === "green" ? "#afff00" : "#f73f21");
+    function intensity(volPct, maxVol) {
+      if (maxVol <= 0) return 0.6;
+      const r = Math.max(0, Math.min(1, volPct / maxVol));
+      return 0.30 + r * 0.70; // 0.30~1.00
     }
-
-    /* ==============================
-       ❺ 데이터 표준화
-       - 변동성 계열: volatility / volume_usdt / color
-       - 급등/급락 계열: spike_pct / dump_pct / volume_usdt_1h / color
-       ============================== */
-    function normalize(raw, path){
-      const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
-      const isSpike = path.includes("_spike_");
-      const isDump  = path.includes("_dump_");
-      return arr.map(d=>{
-        const sym = d.symbol || d.futures_symbol || d.name || "NA";
-        let pct = 0, volUSD = 0, col = d.color || "green";
-        if ("volatility" in d) { pct = +d.volatility || 0; volUSD = +d.volume_usdt || 0; }
-        else {
-          pct = isSpike ? (+d.spike_pct||0) : isDump ? (+d.dump_pct||0) : 0;
-          volUSD = +d.volume_usdt_1h || 0;
-        }
-        return { symbol:sym, pct, volUSD, col };
-      }).filter(x=>x.symbol && x.volUSD >= 0 && x.pct >= 0);
-    }
-
-    async function fetchJSON(path){
-      const res = await fetch(API_BASE + path, {cache:"no-store"});
+    async function fetchData(path) {
+      const url = API_BASE + path;
+      const res = await fetch(url, { cache: "no-store" });
       return await res.json();
     }
+    function normalizeData(raw, endpointPath) {
+      const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
+      const isSpike = endpointPath.includes("_spike_");
+      const isDump  = endpointPath.includes("_dump_");
+      return arr.map(d => {
+        let vol = 0, volUSD = 0, col = d.color;
+        if ("volatility" in d) {
+          vol = +d.volatility || 0;
+          volUSD = +d.volume_usdt || 0;
+        } else {
+          if (isSpike) vol = +d.spike_pct || 0;
+          if (isDump)  vol = +d.dump_pct  || 0;
+          volUSD = +d.volume_usdt_1h || 0;
+        }
+        const sym = d.symbol || d.futures_symbol || d.name || "NA";
+        return { symbol: sym, volatility: vol, volume_usdt: volUSD, color: col || "green" };
+      }).filter(d => d.symbol && d.volume_usdt >= 0 && d.volatility >= 0);
+    }
 
-    /* ==============================
-       ❻ 렌더 — S&P500 스타일 Heatmap
-       ============================== */
-    function render(data){
+    // 렌더(이미지 스타일)
+    function renderTreemap(data) {
+      const { w, h } = sizeSVG();
       svg.selectAll("*").remove();
       if (!data.length) return;
 
-      const maxPct  = d3.max(data, d => d.pct) || 1;
-      const sumTurn = d3.sum(data, d => Math.max(1e-6, d.volUSD));
+      const maxVol = d3.max(data, d => Math.max(0, d.volatility || 0));
 
-      // 트리맵 레이아웃 (작은 갭, 균일 분배 느낌)
-      const root = d3.hierarchy({children:data})
-        .sum(d => Math.max(1e-4, d.volUSD))
-        .sort((a,b)=> (b.data.pct||0) - (a.data.pct||0));
+      const root = d3.hierarchy({ name: "root", children: data })
+        .sum(d => Math.max(0.0001, d.volume_usdt))
+        .sort((a,b) => (b.data.volatility||0) - (a.data.volatility||0));
 
       d3.treemap()
-        .size([CHART_W, CHART_H-56])  // 상단바 제외 높이
-        .paddingInner(2)              // S&P500 스타일의 얇은 그리드
-        .paddingOuter(6)
+        .size([w, h])
+        .paddingInner(2)   /* 얇은 그리드 */
+        .paddingOuter(2)
         .round(true)(root);
 
-      const g = svg.append("g").attr("transform", `translate(0,56)`);
-
-      const cell = g.selectAll("g.cell")
-        .data(root.leaves(), d=>d.data.symbol)
+      const cell = svg.selectAll("g.cell")
+        .data(root.leaves(), d => d.data.symbol)
         .enter().append("g")
-        .attr("class","cell")
-        .attr("transform", d=>`translate(${d.x0},${d.y0})`)
-        .on("mousemove", (ev,d)=>{
+        .attr("class", "cell")
+        .attr("transform", d => `translate(${d.x0},${d.y0})`)
+        .on("mousemove", (event, d) => {
+          const { symbol, volatility, volume_usdt } = d.data;
           tooltip.innerHTML =
-            `<b>${d.data.symbol}</b><br>
-             변화: <b>${fmtPct(d.data.pct)}</b><br>
-             거래대금: <b>${kmb(d.data.volUSD)}</b> USDT`;
-          tooltip.style.left=(ev.clientX+12)+"px";
-          tooltip.style.top =(ev.clientY+12)+"px";
-          tooltip.style.display="block"; tooltip.style.opacity=1;
+            `<b>${symbol}</b><br/>변화: <b>${fmtPct(volatility)}</b><br/>거래대금: <b>${formatCompact(volume_usdt)}</b> USDT`;
+          tooltip.style.left = (event.clientX + 12) + "px";
+          tooltip.style.top  = (event.clientY + 12) + "px";
+          tooltip.style.display = "block"; tooltip.style.opacity = 1;
         })
-        .on("mouseleave", ()=>{ tooltip.style.opacity=0; tooltip.style.display="none"; })
-        .on("click", (ev,d)=> window.open(`https://www.binance.com/en/futures/${d.data.symbol}`,'_blank'));
+        .on("mouseleave", () => { tooltip.style.opacity = 0; tooltip.style.display = "none"; })
+        .on("click", (event, d) => window.open(`https://www.binance.com/en/futures/${d.data.symbol}`, "_blank"));
 
-      // 색상: 방향(녹/적) + 강도(변동성)
+      // 배경 사각형
       cell.append("rect")
-        .attr("width", d=>Math.max(0,d.x1-d.x0))
-        .attr("height",d=>Math.max(0,d.y1-d.y0))
-        .attr("fill", d=>{
-          const base = d.data.col === "green" ? GREEN : RED;
-          const factor = 0.35 + 0.65 * (d.data.pct / maxPct); // 0.35~1.0
-          return colorMix(base, factor);
+        .attr("width", d => Math.max(0, d.x1 - d.x0))
+        .attr("height", d => Math.max(0, d.y1 - d.y0))
+        .attr("fill", d => {
+          const base = colorBase(d.data.color);
+          const inten = intensity(d.data.volatility || 0, maxVol);
+          // 진하기 반영
+          const c = d3.color(base);
+          c.r = Math.round(c.r * inten);
+          c.g = Math.round(c.g * inten);
+          c.b = Math.round(c.b * inten);
+          return c.formatHex();
         });
 
-      // 타일 중심 좌표
-      function cx(d){ return (d.x0 + d.x1)/2; }
-      function cy(d){ return (d.y0 + d.y1)/2; }
-      function w (d){ return (d.x1 - d.x0); }
-      function h (d){ return (d.y1 - d.y0); }
+      // 중심 좌표/크기
+      const cx = d => (d.x0 + d.x1) / 2;
+      const cy = d => (d.y0 + d.y1) / 2;
+      const ww = d => (d.x1 - d.x0);
+      const hh = d => (d.y1 - d.y0);
 
-      // 큰 타일: 심볼(굵게) + % 중앙 배치
-      const BIG_MIN_W = 180, BIG_MIN_H = 120;
-      const MED_MIN_W = 110, MED_MIN_H = 70;
+      // 임계값(첨부 이미지 느낌)
+      const BIG_W = 260, BIG_H = 160;
+      const MED_W = 120, MED_H = 80;
 
-      // 심볼
+      // 중앙 심볼
       cell.append("text")
-        .attr("class","sym")
-        .attr("x", d=>cx(d))
-        .attr("y", d=>cy(d) - 6)
-        .style("font-size", d=>{
-          const s = Math.min(Math.max(16, w(d)*0.18), 42);
+        .attr("class", "label-center")
+        .attr("x", d => cx(d))
+        .attr("y", d => cy(d) - 6)
+        .style("font-size", d => {
+          const s = Math.min(Math.max(16, ww(d) * 0.18), 42);
           return s + "px";
         })
-        .text(d=>{
-          if (w(d) >= MED_MIN_W && h(d) >= MED_MIN_H) return d.data.symbol;
-          if (w(d) >= 70 && h(d) >= 40) return d.data.symbol;
-          return ""; // 너무 작으면 숨김
+        .text(d => {
+          if (ww(d) >= MED_W && hh(d) >= MED_H) return d.data.symbol;
+          if (ww(d) >= BIG_W && hh(d) >= BIG_H) return d.data.symbol;
+          return ""; // 작은 타일은 중앙 라벨 숨김
         });
 
-      // 퍼센트
+      // 중앙 퍼센트
       cell.append("text")
-        .attr("class","pct")
-        .attr("x", d=>cx(d))
-        .attr("y", d=>cy(d) + 22)
-        .style("font-size", d=>{
-          const s = Math.min(Math.max(12, w(d)*0.12), 28);
+        .attr("class", "pct-center")
+        .attr("x", d => cx(d))
+        .attr("y", d => cy(d) + 22)
+        .style("font-size", d => {
+          const s = Math.min(Math.max(12, ww(d) * 0.12), 28);
           return s + "px";
         })
-        .text(d=>{
-          if (w(d) >= BIG_MIN_W && h(d) >= BIG_MIN_H) return (d.data.col==="green" ? "+" : "−") + fmtPct(d.data.pct).replace("%","") + "%";
-          if (w(d) >= MED_MIN_W && h(d) >= MED_MIN_H) return (d.data.col==="green" ? "+" : "−") + d.data.pct.toFixed(2) + "%";
+        .text(d => {
+          if (ww(d) >= BIG_W && hh(d) >= BIG_H) return (d.data.color==="green" ? "+" : "−") + d.data.volatility.toFixed(2) + "%";
+          if (ww(d) >= MED_W && hh(d) >= MED_H) return (d.data.color==="green" ? "+" : "−") + d.data.volatility.toFixed(2) + "%";
           return "";
         });
 
-      // 아주 작은 타일: 좌상단에 작은 심볼만
-      cell.append("text")
-        .attr("class","tiny")
-        .attr("x", d=>d.x0 + 6)
-        .attr("y", d=>d.y0 + 14)
-        .style("font-size", d=> Math.max(9, Math.min(12, w(d)*0.12)) + "px")
-        .text(d=>{
-          if (w(d) < MED_MIN_W || h(d) < MED_MIN_H) {
-            if (w(d) >= 42 && h(d) >= 24) return d.data.symbol;
-          }
-          return "";
-        });
+      // 작은 타일(좌상단): 심볼 + % (한 줄)
+      const small = cell.append("g")
+        .filter(d => ww(d) < MED_W || hh(d) < MED_H);
+
+      small.append("text")
+        .attr("class", "small")
+        .attr("x", d => d.x0 + 6)
+        .attr("y", d => d.y0 + 14)
+        .text(d => d.data.symbol);
+
+      small.append("text")
+        .attr("class", "small")
+        .attr("x", d => d.x0 + 6)
+        .attr("y", d => d.y0 + 28)
+        .text(d => (d.data.color==="green" ? "+" : "−") + d.data.volatility.toFixed(2) + "%");
     }
 
-    /* ==============================
-       ❼ 주기 갱신
-       ============================== */
-    async function refresh(){
+    async function refresh() {
       updateTimeLabel();
       secondsToNextUpdate = 60;
+
       const path = endpointSel.value;
       let raw;
-      try { raw = await fetchJSON(path); }
-      catch { render([]); return; }
-      const data = normalize(raw, path);
-      render(data);
+      try { raw = await fetchData(path); }
+      catch { renderTreemap([]); return; }
+      const data = normalizeData(raw, path);
+      renderTreemap(data);
     }
 
-    endpointSel.addEventListener("change", refresh);
-    setInterval(refresh, 60*1000);
+    // 최초 실행 & 인터벌
     refresh();
+    setInterval(refresh, 60 * 1000);
+
+    // 엔드포인트 전환 즉시 갱신
+    endpointSel.addEventListener("change", refresh);
+
+    // 반응형 제거(요청): 리사이즈 리렌더링 없음
+    // window.addEventListener("resize", () => refresh());
   </script>
 </body>
 </html>
