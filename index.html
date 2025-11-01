@@ -2,314 +2,299 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>SUPERHERO Treemap — Volatility × Turnover (Auto 60s)</title>
+  <title>SUPERHERO Heatmap — Volatility × Turnover</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
-    :root { --scale: 0.70; }
+    :root {
+      /* ⇩ 여기만 만지면 크기 변경 (임베드 안정) */
+      --chart-w: 1280px;
+      --chart-h: 720px;
+    }
     html, body {
       margin: 0; padding: 0;
-      background: #000; color: #fff; font-family: system-ui, -apple-system, Roboto, sans-serif;
-      overflow: hidden; width: 100vw; height: 100vh;
+      background: #0a0b0d; color: #e8e8e8;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans KR", sans-serif;
+      width: 100vw; height: 100vh; overflow: hidden;
     }
-    body {
-      transform: scale(var(--scale));
-      transform-origin: top left;
-      width: calc(100% / var(--scale));
-      height: calc(100% / var(--scale));
-      padding: calc(28px / var(--scale));
+    .wrap {
+      height: 100%; display: grid; place-items: center;
     }
-    h1 { font-size: 24px; margin: 0 0 12px 0; }
-    .row { display: flex; gap: 16px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
-    label, select { font-size: 14px; color: #ddd; }
+    .board {
+      width: var(--chart-w); height: var(--chart-h);
+      background: #060708; border: 1px solid #17191d; border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+      display: grid; grid-template-rows: 56px 1fr;
+      overflow: hidden;
+    }
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 16px; border-bottom: 1px solid #17191d;
+    }
+    .title {
+      font-weight: 800; letter-spacing: .2px; color: #eaeef3; font-size: 18px;
+    }
+    .right { display: flex; align-items: center; gap: 16px; font-size: 13px; color:#a6adbb; }
     select {
-      background: #111; color: #fff; border: 1px solid #333; border-radius: 6px; padding: 6px 10px;
-      outline: none;
+      background: #0f1217; color: #eaeef3; border: 1px solid #20242c; border-radius: 6px;
+      padding: 6px 10px; outline: none; font-size: 13px;
     }
-    #time { font-size: 14px; color: #aaa; }
-    #countdown { margin-left: 12px; color: #888; }
-    #chartWrap { width: 100%; height: calc(100% - 110px); /* 상단 영역 제외 */ }
-    #chart { width: 100%; height: 100%; display: block; border: 1px solid #222; border-radius: 10px; }
+    #countdown { color:#7f8896; }
+    svg { display:block; }
     .cell { cursor: pointer; }
-    .cell rect { rx: 10; ry: 10; }
-    .label {
-      font-weight: 700; fill: #0a0a0a; /* 라벨 가독성용 outline을 뒤에 그림자 글자와 조합 */
-      paint-order: stroke; stroke: rgba(0,0,0,0.35); stroke-width: 3px; stroke-linejoin: round;
+    .cell rect {
+      rx: 6; ry: 6;
+      stroke: #0c0e12; stroke-width: 1; /* 얇은 경계 */
     }
-    .sub {
-      font-size: 11px; fill: #f0f0f0; opacity: .92;
-      paint-order: stroke; stroke: rgba(0,0,0,0.25); stroke-width: 2px; stroke-linejoin: round;
+    .sym {
+      fill: #f7f9fb; font-weight: 800; text-anchor: middle;
+      paint-order: stroke; stroke: rgba(0,0,0,.35); stroke-width: 3px; stroke-linejoin: round;
     }
+    .pct {
+      fill: #f1f5f9; font-weight: 700; text-anchor: middle;
+      paint-order: stroke; stroke: rgba(0,0,0,.28); stroke-width: 2px; stroke-linejoin: round;
+    }
+    .tiny { fill:#e8ecf2; font-weight:700; text-anchor: middle; opacity:.95; }
     .tooltip {
       position: fixed; pointer-events: none; z-index: 50;
-      background: rgba(15,15,15,0.92); color: #fff; border: 1px solid #333; border-radius: 8px;
-      padding: 10px 12px; font-size: 13px; line-height: 1.45;
-      box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+      background: rgba(12,14,18,.96); color: #fff; border: 1px solid #232831; border-radius: 8px;
+      padding: 10px 12px; font-size: 13px; line-height: 1.5;
+      box-shadow: 0 8px 20px rgba(0,0,0,.35);
+      display:none; opacity:0;
     }
-    .legend { font-size: 12px; color: #bbb; display:flex; gap:16px; align-items:center; }
-    .chip { width:14px; height:14px; border-radius: 3px; display:inline-block; margin-right:6px; border:1px solid #333; }
-    .chip.up { background:#afff00; }
-    .chip.down { background:#f73f21; }
   </style>
 </head>
 <body>
-  <h1>■ SUPERHERO 실시간 트리맵 (면적=거래대금, 색상=등락, 진하기=변동성) ■</h1>
-
-  <div class="row">
-    <div class="legend">
-      <span><span class="chip up"></span>상승</span>
-      <span><span class="chip down"></span>하락</span>
-      <span>진하기 ↑ = 변동성(%) ↑</span>
-      <span>면적 ↑ = 거래대금(USDT) ↑</span>
+  <div class="wrap">
+    <div class="board">
+      <div class="topbar">
+        <div class="title">#CRYPTO — REAL-TIME HEATMAP</div>
+        <div class="right">
+          <label for="endpoint">뷰</label>
+          <select id="endpoint" title="데이터 소스 선택">
+            <option value="/top_volatility_1m">1m 변동성</option>
+            <option value="/top_volatility_5m" selected>5m 변동성</option>
+            <option value="/top_volatility_15m">15m 변동성</option>
+            <option value="/top_volatility_1h">1h 변동성</option>
+            <option value="/top_spike_1h_recent">신규코인 급등(≤6m)</option>
+            <option value="/top_dump_1h_recent">신규코인 급락(≤6m)</option>
+            <option value="/top_spike_1h_all">전종목 급등(1h)</option>
+            <option value="/top_dump_1h_all">전종목 급락(1h)</option>
+          </select>
+          <span id="time">UTC …</span>
+          <span id="countdown">60s</span>
+        </div>
+      </div>
+      <div id="stage">
+        <svg id="chart" width="100%" height="100%"></svg>
+      </div>
     </div>
   </div>
 
-  <div class="row">
-    <label for="endpoint">엔드포인트:</label>
-    <select id="endpoint">
-      <!-- 변동성 랭킹 계열 -->
-      <option value="/top_volatility_1m">1분 변동성</option>
-      <option value="/top_volatility_5m" selected>5분 변동성</option>
-      <option value="/top_volatility_15m">15분 변동성</option>
-      <option value="/top_volatility_1h">1시간 변동성</option>
-      <!-- 신규코인 급등/급락 (≤6개월) -->
-      <option value="/top_spike_1h_recent">신규코인 급등(1H)</option>
-      <option value="/top_dump_1h_recent">신규코인 급락(1H)</option>
-      <!-- 전종목 급등/급락 -->
-      <option value="/top_spike_1h_all">전종목 급등(1H)</option>
-      <option value="/top_dump_1h_all">전종목 급락(1H)</option>
-    </select>
-
-    <span id="time">UTC 로딩 중...</span>
-    <span id="countdown">다음 갱신까지 60s</span>
-  </div>
-
-  <div id="chartWrap">
-    <svg id="chart"></svg>
-  </div>
-
-  <div id="tooltip" class="tooltip" style="opacity:0; display:none;"></div>
+  <div id="tooltip" class="tooltip"></div>
 
   <script>
-    // ====== 기본 API 베이스 (네 Railway 도메인) ======
+    /* ==============================
+       ❶ 고정 크기 설정
+       ============================== */
+    const CHART_W = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--chart-w'));
+    const CHART_H = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--chart-h'));
+    const svg = d3.select("#chart").attr("width", CHART_W).attr("height", CHART_H);
+
+    /* ==============================
+       ❷ 데이터 소스
+       ============================== */
     const API_BASE = "https://binance-flask-app-production.up.railway.app";
-
-    // ====== 셀렉터와 UI 타이머 ======
     const endpointSel = document.getElementById("endpoint");
-    let secondsToNextUpdate = 60;
-    function updateTimeLabel() {
-      const now = new Date();
-      const y = now.getUTCFullYear();
-      const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-      const d = String(now.getUTCDate()).padStart(2, '0');
-      const h = String(now.getUTCHours()).padStart(2, '0');
-      const mm = String(now.getUTCMinutes()).padStart(2, '0');
-      document.getElementById("time").textContent = `${y}-${m}-${d} ${h}:${mm} UTC`;
-    }
-    function startCountdown() {
-      setInterval(() => {
-        secondsToNextUpdate--;
-        if (secondsToNextUpdate <= 0) secondsToNextUpdate = 60;
-        document.getElementById("countdown").textContent = `다음 갱신까지 ${secondsToNextUpdate}s`;
-      }, 1000);
-    }
-
-    // ====== 유틸 ======
-    const fmtPct = v => `${(+v).toFixed(2)}%`;
-    function formatCompact(num) {
-      const n = +num || 0;
-      if (n >= 1e12) return (n / 1e12).toFixed(2) + "T";
-      if (n >= 1e9)  return (n / 1e9 ).toFixed(2) + "B";
-      if (n >= 1e6)  return (n / 1e6 ).toFixed(2) + "M";
-      if (n >= 1e3)  return (n / 1e3 ).toFixed(2) + "K";
-      return n.toFixed(0);
-    }
-    const colorBase = c => (c === "green" ? "#afff00" : "#f73f21");
-
-    // 색 진하기를 변동성(%)에 맞춰 보정 (0~1) → 0.3~1.0 범위로 매핑
-    function intensity(volPct, maxVol) {
-      if (maxVol <= 0) return 0.6;
-      const r = Math.max(0, Math.min(1, volPct / maxVol));
-      return 0.30 + r * 0.70;
-    }
-    // hex 색 밝기 보정 (간단 가중 평균)
-    function tintHex(hex, factor) {
-      // hex '#rrggbb' → rgb
-      const c = hex.replace('#','');
-      const r = parseInt(c.substring(0,2), 16);
-      const g = parseInt(c.substring(2,4), 16);
-      const b = parseInt(c.substring(4,6), 16);
-      const rr = Math.max(0, Math.min(255, Math.round(r * factor)));
-      const gg = Math.max(0, Math.min(255, Math.round(g * factor)));
-      const bb = Math.max(0, Math.min(255, Math.round(b * factor)));
-      const toHex = x => x.toString(16).padStart(2, '0');
-      return `#${toHex(rr)}${toHex(gg)}${toHex(bb)}`;
-    }
-
-    // ====== SVG 및 레이아웃 ======
-    const svg = d3.select("#chart");
-    function sizeSVG() {
-      const wrap = document.getElementById("chartWrap");
-      const w = wrap.clientWidth;
-      const h = wrap.clientHeight;
-      svg.attr("width", w).attr("height", h);
-      return { w, h };
-    }
-
-    // ====== 데이터 매핑 (엔드포인트마다 필드 다름) ======
-    // 변동성 계열: [{symbol, volatility, color, volume_usdt}]
-    // 급등/급락 계열: spike_pct/dump_pct + volume_usdt_1h, color
-    function normalizeData(raw, endpointPath) {
-      // raw가 {data: [...]} 형태일 수도 있음 → 일관화
-      const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
-      const isSpike = endpointPath.includes("_spike_");
-      const isDump  = endpointPath.includes("_dump_");
-      return arr.map(d => {
-        let vol = 0, volUSD = 0, col = d.color;
-        if ("volatility" in d) {
-          vol = +d.volatility || 0;
-          volUSD = +d.volume_usdt || 0;
-        } else {
-          if (isSpike) vol = +d.spike_pct || 0;
-          if (isDump)  vol = +d.dump_pct  || 0;
-          volUSD = +d.volume_usdt_1h || 0;
-        }
-        const sym = d.symbol || d.futures_symbol || d.name || "NA";
-        return { symbol: sym, volatility: vol, volume_usdt: volUSD, color: col || "green" };
-      }).filter(d => d.symbol && d.volume_usdt >= 0 && d.volatility >= 0);
-    }
-
-    // ====== Treemap 렌더링 ======
     const tooltip = document.getElementById("tooltip");
 
-    function showTip(html, x, y) {
-      tooltip.innerHTML = html;
-      tooltip.style.left = (x + 12) + "px";
-      tooltip.style.top  = (y + 12) + "px";
-      tooltip.style.opacity = 1;
-      tooltip.style.display = "block";
+    /* ==============================
+       ❸ 시간 표시 & 카운트다운
+       ============================== */
+    let secondsToNextUpdate = 60;
+    function updateTimeLabel(){
+      const now = new Date();
+      const y = now.getUTCFullYear();
+      const m = String(now.getUTCMonth()+1).padStart(2,'0');
+      const d = String(now.getUTCDate()).padStart(2,'0');
+      const h = String(now.getUTCHours()).padStart(2,'0');
+      const mm = String(now.getUTCMinutes()).padStart(2,'0');
+      document.getElementById("time").textContent = `${y}-${m}-${d} ${h}:${mm} UTC`;
     }
-    function hideTip() {
-      tooltip.style.opacity = 0;
-      tooltip.style.display = "none";
+    setInterval(() => {
+      secondsToNextUpdate = secondsToNextUpdate <= 1 ? 60 : secondsToNextUpdate-1;
+      document.getElementById("countdown").textContent = `${secondsToNextUpdate}s`;
+    }, 1000);
+
+    /* ==============================
+       ❹ 유틸
+       ============================== */
+    const fmtPct = v => `${(+v).toFixed(2)}%`;
+    function kmb(num){
+      const n = +num || 0;
+      if (n >= 1e12) return (n/1e12).toFixed(2)+'T';
+      if (n >= 1e9 ) return (n/1e9 ).toFixed(2)+'B';
+      if (n >= 1e6 ) return (n/1e6 ).toFixed(2)+'M';
+      if (n >= 1e3 ) return (n/1e3 ).toFixed(2)+'K';
+      return n.toFixed(0);
     }
-
-    function renderTreemap(data) {
-      const { w, h } = sizeSVG();
-      svg.selectAll("*").remove();
-
-      if (!data.length) return;
-
-      const maxVol = d3.max(data, d => Math.max(0, d.volatility || 0));
-      const totalTurnover = d3.sum(data, d => Math.max(0, d.volume_usdt || 0));
-
-      // D3 Hierarchy
-      const root = d3.hierarchy({ name: "root", children: data })
-        .sum(d => Math.max(0.0001, d.volume_usdt)) // 면적 = 거래대금
-        .sort((a,b) => (b.data.volatility||0) - (a.data.volatility||0));
-
-      // Treemap 레이아웃
-      d3.treemap()
-        .size([w, h])
-        .paddingInner(8)
-        .paddingOuter(6)
-        .round(true)(root);
-
-      // 셀 그룹
-      const cell = svg.selectAll("g.cell")
-        .data(root.leaves(), d => d.data.symbol)
-        .enter().append("g")
-        .attr("class", "cell")
-        .attr("transform", d => `translate(${d.x0},${d.y0})`)
-        .on("mousemove", (event, d) => {
-          const sym = d.data.symbol;
-          const vol = d.data.volatility;
-          const usd = d.data.volume_usdt;
-          showTip(
-            `<b>${sym}</b><br/>
-             변동성: <b>${fmtPct(vol)}</b><br/>
-             거래대금: <b>${formatCompact(usd)}</b> USDT`,
-            event.clientX, event.clientY
-          );
-        })
-        .on("mouseleave", hideTip)
-        .on("click", (event, d) => {
-          const url = `https://www.binance.com/en/futures/${d.data.symbol}`;
-          window.open(url, "_blank");
-        });
-
-      // 배경 사각형
-      cell.append("rect")
-        .attr("width", d => Math.max(0, d.x1 - d.x0))
-        .attr("height", d => Math.max(0, d.y1 - d.y0))
-        .attr("fill", d => {
-          const base = colorBase(d.data.color);
-          const inten = intensity(d.data.volatility || 0, maxVol);
-          return tintHex(base, inten);
-        })
-        .attr("stroke", "#121212")
-        .attr("stroke-width", 1.2);
-
-      // 라벨 텍스트 (심볼)
-      cell.append("text")
-        .attr("class", "label")
-        .attr("x", 10)
-        .attr("y", 18)
-        .text(d => d.data.symbol)
-        .style("font-size", function(d){
-          // 셀 넓이에 따라 동적 폰트
-          const w = Math.max(50, d.x1 - d.x0);
-          return Math.max(12, Math.min(20, w * 0.08)) + "px";
-        });
-
-      // 보조 텍스트 (변동성/거래대금)
-      cell.append("text")
-        .attr("class", "sub")
-        .attr("x", 10)
-        .attr("y", 36)
-        .text(d => `${fmtPct(d.data.volatility)} • ${formatCompact(d.data.volume_usdt)} USDT`)
-        .style("font-size", function(d){
-          const w = Math.max(50, d.x1 - d.x0);
-          return Math.max(10, Math.min(14, w * 0.045)) + "px";
-        })
-        .each(function(d){
-          // 너무 작은 셀은 서브 텍스트 숨김
-          const width = d.x1 - d.x0, height = d.y1 - d.y0;
-          if (width < 110 || height < 50) d3.select(this).style("display", "none");
-        });
+    function lerp(a,b,t){ return a + (b-a)*t; }
+    // MSFT/AAPL 스타일의 선명한 녹/적 팔레트 (밝기 가변)
+    const GREEN = [175,255,0];  // #afff00
+    const RED   = [247, 63,33]; // #f73f21
+    function colorMix(baseRGB, factor){
+      // factor 0.25~1.00 범위 권장
+      const f = Math.max(.25, Math.min(1, factor));
+      const [r,g,b] = baseRGB.map(c => Math.round(c * f));
+      return `rgb(${r},${g},${b})`;
     }
 
-    // ====== 데이터 가져오기 & 주기 갱신 ======
-    async function fetchData(path) {
-      const url = API_BASE + path;
-      const res = await fetch(url, { cache: "no-store" });
+    /* ==============================
+       ❺ 데이터 표준화
+       - 변동성 계열: volatility / volume_usdt / color
+       - 급등/급락 계열: spike_pct / dump_pct / volume_usdt_1h / color
+       ============================== */
+    function normalize(raw, path){
+      const arr = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : []);
+      const isSpike = path.includes("_spike_");
+      const isDump  = path.includes("_dump_");
+      return arr.map(d=>{
+        const sym = d.symbol || d.futures_symbol || d.name || "NA";
+        let pct = 0, volUSD = 0, col = d.color || "green";
+        if ("volatility" in d) { pct = +d.volatility || 0; volUSD = +d.volume_usdt || 0; }
+        else {
+          pct = isSpike ? (+d.spike_pct||0) : isDump ? (+d.dump_pct||0) : 0;
+          volUSD = +d.volume_usdt_1h || 0;
+        }
+        return { symbol:sym, pct, volUSD, col };
+      }).filter(x=>x.symbol && x.volUSD >= 0 && x.pct >= 0);
+    }
+
+    async function fetchJSON(path){
+      const res = await fetch(API_BASE + path, {cache:"no-store"});
       return await res.json();
     }
 
-    async function refresh() {
-      updateTimeLabel();
-      secondsToNextUpdate = 60;
+    /* ==============================
+       ❻ 렌더 — S&P500 스타일 Heatmap
+       ============================== */
+    function render(data){
+      svg.selectAll("*").remove();
+      if (!data.length) return;
 
-      const path = endpointSel.value;
-      let raw;
-      try {
-        raw = await fetchData(path);
-      } catch (_) {
-        renderTreemap([]); return;
-      }
-      const data = normalizeData(raw, path);
-      renderTreemap(data);
+      const maxPct  = d3.max(data, d => d.pct) || 1;
+      const sumTurn = d3.sum(data, d => Math.max(1e-6, d.volUSD));
+
+      // 트리맵 레이아웃 (작은 갭, 균일 분배 느낌)
+      const root = d3.hierarchy({children:data})
+        .sum(d => Math.max(1e-4, d.volUSD))
+        .sort((a,b)=> (b.data.pct||0) - (a.data.pct||0));
+
+      d3.treemap()
+        .size([CHART_W, CHART_H-56])  // 상단바 제외 높이
+        .paddingInner(2)              // S&P500 스타일의 얇은 그리드
+        .paddingOuter(6)
+        .round(true)(root);
+
+      const g = svg.append("g").attr("transform", `translate(0,56)`);
+
+      const cell = g.selectAll("g.cell")
+        .data(root.leaves(), d=>d.data.symbol)
+        .enter().append("g")
+        .attr("class","cell")
+        .attr("transform", d=>`translate(${d.x0},${d.y0})`)
+        .on("mousemove", (ev,d)=>{
+          tooltip.innerHTML =
+            `<b>${d.data.symbol}</b><br>
+             변화: <b>${fmtPct(d.data.pct)}</b><br>
+             거래대금: <b>${kmb(d.data.volUSD)}</b> USDT`;
+          tooltip.style.left=(ev.clientX+12)+"px";
+          tooltip.style.top =(ev.clientY+12)+"px";
+          tooltip.style.display="block"; tooltip.style.opacity=1;
+        })
+        .on("mouseleave", ()=>{ tooltip.style.opacity=0; tooltip.style.display="none"; })
+        .on("click", (ev,d)=> window.open(`https://www.binance.com/en/futures/${d.data.symbol}`,'_blank'));
+
+      // 색상: 방향(녹/적) + 강도(변동성)
+      cell.append("rect")
+        .attr("width", d=>Math.max(0,d.x1-d.x0))
+        .attr("height",d=>Math.max(0,d.y1-d.y0))
+        .attr("fill", d=>{
+          const base = d.data.col === "green" ? GREEN : RED;
+          const factor = 0.35 + 0.65 * (d.data.pct / maxPct); // 0.35~1.0
+          return colorMix(base, factor);
+        });
+
+      // 타일 중심 좌표
+      function cx(d){ return (d.x0 + d.x1)/2; }
+      function cy(d){ return (d.y0 + d.y1)/2; }
+      function w (d){ return (d.x1 - d.x0); }
+      function h (d){ return (d.y1 - d.y0); }
+
+      // 큰 타일: 심볼(굵게) + % 중앙 배치
+      const BIG_MIN_W = 180, BIG_MIN_H = 120;
+      const MED_MIN_W = 110, MED_MIN_H = 70;
+
+      // 심볼
+      cell.append("text")
+        .attr("class","sym")
+        .attr("x", d=>cx(d))
+        .attr("y", d=>cy(d) - 6)
+        .style("font-size", d=>{
+          const s = Math.min(Math.max(16, w(d)*0.18), 42);
+          return s + "px";
+        })
+        .text(d=>{
+          if (w(d) >= MED_MIN_W && h(d) >= MED_MIN_H) return d.data.symbol;
+          if (w(d) >= 70 && h(d) >= 40) return d.data.symbol;
+          return ""; // 너무 작으면 숨김
+        });
+
+      // 퍼센트
+      cell.append("text")
+        .attr("class","pct")
+        .attr("x", d=>cx(d))
+        .attr("y", d=>cy(d) + 22)
+        .style("font-size", d=>{
+          const s = Math.min(Math.max(12, w(d)*0.12), 28);
+          return s + "px";
+        })
+        .text(d=>{
+          if (w(d) >= BIG_MIN_W && h(d) >= BIG_MIN_H) return (d.data.col==="green" ? "+" : "−") + fmtPct(d.data.pct).replace("%","") + "%";
+          if (w(d) >= MED_MIN_W && h(d) >= MED_MIN_H) return (d.data.col==="green" ? "+" : "−") + d.data.pct.toFixed(2) + "%";
+          return "";
+        });
+
+      // 아주 작은 타일: 좌상단에 작은 심볼만
+      cell.append("text")
+        .attr("class","tiny")
+        .attr("x", d=>d.x0 + 6)
+        .attr("y", d=>d.y0 + 14)
+        .style("font-size", d=> Math.max(9, Math.min(12, w(d)*0.12)) + "px")
+        .text(d=>{
+          if (w(d) < MED_MIN_W || h(d) < MED_MIN_H) {
+            if (w(d) >= 42 && h(d) >= 24) return d.data.symbol;
+          }
+          return "";
+        });
     }
 
-    // 최초 실행 & 인터벌
-    refresh();
-    startCountdown();
-    setInterval(refresh, 60 * 1000);
+    /* ==============================
+       ❼ 주기 갱신
+       ============================== */
+    async function refresh(){
+      updateTimeLabel();
+      secondsToNextUpdate = 60;
+      const path = endpointSel.value;
+      let raw;
+      try { raw = await fetchJSON(path); }
+      catch { render([]); return; }
+      const data = normalize(raw, path);
+      render(data);
+    }
 
-    // 엔드포인트 전환 즉시 갱신
     endpointSel.addEventListener("change", refresh);
-
-    // 리사이즈 반응
-    window.addEventListener("resize", () => refresh());
+    setInterval(refresh, 60*1000);
+    refresh();
   </script>
 </body>
 </html>
