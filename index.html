@@ -103,7 +103,7 @@
       }).filter(d=>d.symbol && d.volume_usdt>=0 && d.volatility>=0);
     }
 
-    // ── 레이아웃 선택(이제 '변동성'을 면적 기준으로 사용)
+    // ── 레이아웃 선택(면적=변동성)
     const TREEMAP_MAX_ITEMS=28, MIN_AREA_RATIO=0.01;
     function selectForLayout(data, w, h){
       const areaMetric = d => Math.abs(d.volatility||0);        // 면적 기준 = |변동성|
@@ -137,13 +137,14 @@
       const tree = picked.map(d=>{
         const sign = d.color==='green' ? '+' : '−';
         const areaVal = Math.max(0.001, Math.abs(d.volatility||0)); // 0 보호
+        const displayValue = `${d.symbol} ${sign}${(d.volatility||0).toFixed(2)}%`;
         return {
           symbol: d.symbol,
           area: areaVal,                 // ✔ 면적 = 변동성(|vol|)
           vol: d.volatility,
-          turnover: d.volume_usdt,       // ✔ 진하기 기준으로 사용
+          turnover: d.volume_usdt,       // ✔ 진하기 기준
           color: d.color,
-          displayValue: `${d.symbol}\n${sign}${(d.volatility||0).toFixed(2)}%`,
+          displayValue,
           // 라벨 폰트 산정 보조치(근사)
           _data: { w: w*(areaVal/Math.max(totalAreaMetric,1)), h }
         };
@@ -166,18 +167,26 @@
       const dataSet = {
         label:"SUPERHERO",
         tree,
-        key:"area",                 // ✔ 면적 = area(변동성)
+        key:"area",                       // ✔ 면적 = area(변동성)
+        groups:["displayValue"],          // ✔ 라벨용 그룹(필수)
         spacing:2,
         borderWidth:1,
         borderColor:"rgba(10,10,10,0.9)",
         backgroundColor,
         labels:{
           display:true,
-          formatter:(ctx)=>ctx.raw.displayValue,  // "SYMBOL\n+1.23%"
+          // ✔ displayValue → g(그룹) → symbol 순으로 안전하게
+          formatter:(ctx)=>{
+            const r = ctx.raw || {};
+            return r.displayValue || r.g || r.symbol || "";
+          },
           color:'#eef2f6',
           align:'center',
           font:(ctx)=>{
-            const base = Math.min(ctx.raw._data.w, ctx.raw._data.h);
+            const r = ctx.raw || {};
+            const approxW = r._data?.w || 80;   // 안전한 기본값
+            const approxH = r._data?.h || 60;
+            const base = Math.min(approxW, approxH);
             const size = Math.max(12, Math.min(42, base*0.16));
             return { size, weight:'800', lineHeight:1.15 };
           },
